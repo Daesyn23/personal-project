@@ -1,12 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #fffafc;
+  --background: #fff7fb;
   --foreground: #1a1a1a;
   --accent: #ec4899;
   --accent-soft: #fce7f3;
   --romaji-blue: #2563eb;
   --muted: #6b7280;
+  /* Textbook-style flashcard (Minna-style reference) */
+  --fc-romaji-blue: #2196f3;
+  --fc-romaji-tail: #525252;
+  --fc-gloss-pink: #e91e63;
+  --fc-example-verb: #8b1538;
 }
 
 @theme inline {
@@ -16,7 +21,7 @@
 }
 
 body {
-  background: var(--background);
+  background: transparent;
   color: var(--foreground);
   font-family: var(--font-sans);
 }
@@ -43,5 +48,178 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .flashcard-enter {
     animation: none;
+  }
+}
+
+/* —— Seasonal background: blush pink, airy light (winter cool + spring warmth) —— */
+.seasonal-backdrop-gradient {
+  background:
+    radial-gradient(ellipse 95% 70% at 50% -18%, rgba(255, 255, 255, 0.98), transparent 52%),
+    radial-gradient(ellipse 85% 60% at 92% 22%, rgba(219, 234, 254, 0.55), transparent 50%),
+    radial-gradient(ellipse 80% 55% at 8% 35%, rgba(252, 231, 243, 0.75), transparent 48%),
+    radial-gradient(ellipse 100% 85% at 50% 118%, rgba(254, 243, 199, 0.42), transparent 58%),
+    radial-gradient(ellipse 70% 50% at 65% 55%, rgba(254, 205, 211, 0.2), transparent 45%),
+    linear-gradient(
+      172deg,
+      #ffffff 0%,
+      #fff7fb 18%,
+      #fff1f3 42%,
+      #fdf4ff 65%,
+      #fffbeb 88%,
+      #fffafc 100%
+    );
+}
+
+/* Tiled “snow haze” — two layers, transform-only animation (fewer DOM nodes than per-flake dots) */
+.seasonal-snow-field {
+  pointer-events: none;
+  z-index: 0;
+}
+
+.seasonal-snow-field-a {
+  opacity: 0.48;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Ccircle cx='18' cy='22' r='1.1' fill='%23fff' opacity='0.62'/%3E%3Ccircle cx='62' cy='48' r='0.85' fill='%23fff' opacity='0.52'/%3E%3Ccircle cx='96' cy='18' r='0.75' fill='%23fff' opacity='0.48'/%3E%3Ccircle cx='42' cy='88' r='0.95' fill='%23fff' opacity='0.58'/%3E%3Ccircle cx='104' cy='96' r='0.65' fill='%23fff' opacity='0.42'/%3E%3C/svg%3E");
+  background-size: 120px 120px;
+  animation: seasonal-snow-field-shift 24s linear infinite;
+}
+
+.seasonal-snow-field-b {
+  opacity: 0.34;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='140'%3E%3Ccircle cx='28' cy='35' r='0.9' fill='%23fff' opacity='0.52'/%3E%3Ccircle cx='88' cy='62' r='1.05' fill='%23fff' opacity='0.55'/%3E%3Ccircle cx='130' cy='28' r='0.7' fill='%23fff' opacity='0.42'/%3E%3Ccircle cx='55' cy='108' r='0.8' fill='%23fff' opacity='0.45'/%3E%3C/svg%3E");
+  background-size: 160px 140px;
+  animation: seasonal-snow-field-shift-reverse 32s linear infinite;
+}
+
+@keyframes seasonal-snow-field-shift {
+  from {
+    transform: translate3d(0, -4%, 0);
+  }
+  to {
+    transform: translate3d(-72px, 6%, 0);
+  }
+}
+
+@keyframes seasonal-snow-field-shift-reverse {
+  from {
+    transform: translate3d(0, 2%, 0);
+  }
+  to {
+    transform: translate3d(56px, -5%, 0);
+  }
+}
+
+.seasonal-horizon-svg {
+  z-index: 1;
+}
+
+.seasonal-motion {
+  z-index: 2;
+}
+
+.seasonal-snow {
+  animation: seasonal-snow-fall linear infinite;
+}
+
+.seasonal-petal {
+  width: 10px;
+  height: 14px;
+  border-radius: 60% 60% 45% 45% / 70% 70% 35% 35%;
+  background: linear-gradient(145deg, rgba(255, 182, 220, 0.95), rgba(251, 113, 133, 0.82));
+  box-shadow: 0 1px 3px rgba(236, 72, 153, 0.12);
+  opacity: 0.92;
+}
+
+.seasonal-petal-a {
+  animation: seasonal-sakura-a linear infinite;
+}
+.seasonal-petal-b {
+  animation: seasonal-sakura-b linear infinite;
+}
+.seasonal-petal-c {
+  animation: seasonal-sakura-c linear infinite;
+}
+
+.seasonal-flake {
+  animation: seasonal-flake linear infinite;
+  user-select: none;
+}
+
+@keyframes seasonal-snow-fall {
+  0% {
+    transform: translate3d(0, -5vh, 0);
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate3d(18px, 105vh, 0);
+    opacity: 0.35;
+  }
+}
+
+@keyframes seasonal-sakura-a {
+  0% {
+    transform: translate3d(0, -8vh, 0) rotate(0deg);
+    opacity: 0.88;
+  }
+  100% {
+    transform: translate3d(45px, 108vh, 0) rotate(300deg);
+    opacity: 0.12;
+  }
+}
+
+@keyframes seasonal-sakura-b {
+  0% {
+    transform: translate3d(0, -8vh, 0) rotate(40deg);
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate3d(-35px, 108vh, 0) rotate(-260deg);
+    opacity: 0.1;
+  }
+}
+
+@keyframes seasonal-sakura-c {
+  0% {
+    transform: translate3d(0, -8vh, 0) rotate(-20deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate3d(20px, 108vh, 0) rotate(200deg);
+    opacity: 0.08;
+  }
+}
+
+@keyframes seasonal-flake {
+  0% {
+    transform: translate3d(0, -6vh, 0) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(-28px, 105vh, 0) rotate(300deg);
+    opacity: 0.58;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seasonal-snow,
+  .seasonal-petal-a,
+  .seasonal-petal-b,
+  .seasonal-petal-c,
+  .seasonal-flake,
+  .seasonal-snow-field-a,
+  .seasonal-snow-field-b {
+    animation: none !important;
+  }
+  .seasonal-snow-field-a,
+  .seasonal-snow-field-b {
+    transform: none !important;
+  }
+  .seasonal-backdrop-gradient {
+    opacity: 1;
   }
 }

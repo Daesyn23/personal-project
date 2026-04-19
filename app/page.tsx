@@ -98,8 +98,8 @@ export default function HomePage() {
   const activeSetName = sets.find((s) => s.id === activeSetId)?.name;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#fffafc] via-white to-[#fef6fb]">
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+    <div className="min-h-screen bg-transparent">
+      <main className="mx-auto max-w-6xl px-4 py-8 pb-16 sm:px-6 sm:py-12 sm:pb-20">
         <header className="mb-8 flex flex-col gap-6 sm:mb-10 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-wider text-pink-500/90">Study</p>
@@ -252,18 +252,6 @@ export default function HomePage() {
             ))}
           </ul>
         )}
-
-        <footer className="mt-20 border-t border-pink-100/80 pt-10 text-center text-sm text-neutral-500">
-          <p>
-            Aaron Nisperos —{" "}
-            <a
-              href="mailto:aaronjoshuanisperos@gmail.com"
-              className="text-pink-600 underline-offset-2 hover:underline"
-            >
-              aaronjoshuanisperos@gmail.com
-            </a>
-          </p>
-        </footer>
       </main>
 
       <PresentFlashcards

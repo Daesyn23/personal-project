@@ -79,8 +79,8 @@ export function PresentFlashcards({
 
   const phaseLabel =
     phase === "word"
-      ? "Kana · Romaji · context"
-      : "Kana · Romaji · context · example";
+      ? "Romaji · Kana · context"
+      : "Romaji · Kana · context · example";
 
   return (
     <div
