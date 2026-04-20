@@ -27,3 +27,22 @@ export type FlashcardRow = {
 export type FlashcardDraft = Omit<FlashcardRow, "id" | "created_at"> & {
   id?: string;
 };
+
+export type WorkspaceFolderRow = {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  created_at?: string;
+  /** Subfolders + files directly inside this folder (filled when counts are loaded) */
+  item_count?: number;
+};
+
+export type WorkspaceFileRow = {
+  id: string;
+  folder_id: string | null;
+  filename: string;
+  storage_path: string;
+  mime_type: string | null;
+  byte_size: number | null;
+  created_at?: string;
+};

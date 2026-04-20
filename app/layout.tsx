@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Flashcard Presentation",
+  title: "My Workspace",
   description: "Presentation-style flashcards for teaching and review.",
   authors: [{ name: "Aaron Nisperos", url: "mailto:aaronjoshuanisperos@gmail.com" }],
 };

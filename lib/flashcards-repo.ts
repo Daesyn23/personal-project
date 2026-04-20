@@ -52,20 +52,25 @@ function writeLocal(store: LocalStore) {
   localStorage.setItem(LOCAL_KEY, JSON.stringify(store));
 }
 
+function sortCardSetsByName(sets: CardSetRow[]): CardSetRow[] {
+  return [...sets].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+  );
+}
+
 export async function listCardSets(): Promise<CardSetRow[]> {
   const supabase = getSupabaseBrowserClient();
   if (supabase) {
-    const { data: sets, error } = await supabase
-      .from("card_sets")
-      .select("id, name, created_at")
-      .order("created_at", { ascending: false });
+    const { data: sets, error } = await supabase.from("card_sets").select("id, name, created_at");
     if (error) {
       console.error(error);
       const store = readLocal();
-      return store.sets.map((x) => ({
-        ...x,
-        card_count: store.cards.filter((c) => c.set_id === x.id).length,
-      }));
+      return sortCardSetsByName(
+        store.sets.map((x) => ({
+          ...x,
+          card_count: store.cards.filter((c) => c.set_id === x.id).length,
+        }))
+      );
     }
     const { data: fc } = await supabase.from("flashcards").select("set_id");
     const countMap: Record<string, number> = {};
@@ -74,20 +79,22 @@ export async function listCardSets(): Promise<CardSetRow[]> {
       if (!sid) continue;
       countMap[sid] = (countMap[sid] ?? 0) + 1;
     }
-    return (sets ?? []).map((s) => ({
-      id: s.id,
-      name: s.name,
-      created_at: s.created_at,
-      card_count: countMap[s.id] ?? 0,
-    }));
+    return sortCardSetsByName(
+      (sets ?? []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        created_at: s.created_at,
+        card_count: countMap[s.id] ?? 0,
+      }))
+    );
   }
   const store = readLocal();
-  return store.sets
-    .map((s) => ({
+  return sortCardSetsByName(
+    store.sets.map((s) => ({
       ...s,
       card_count: store.cards.filter((c) => c.set_id === s.id).length,
     }))
-    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  );
 }
 
 export async function createCardSet(name: string): Promise<string> {
@@ -124,6 +131,33 @@ export async function createCardSet(name: string): Promise<string> {
   });
   writeLocal(store);
   return id;
+}
+
+export async function updateCardSetName(setId: string, name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Name is required");
+
+  const supabase = getSupabaseBrowserClient();
+  if (supabase) {
+    const { error } = await supabase.from("card_sets").update({ name: trimmed }).eq("id", setId);
+    if (error) {
+      console.error(error);
+      const store = readLocal();
+      const idx = store.sets.findIndex((s) => s.id === setId);
+      if (idx >= 0) {
+        store.sets[idx] = { ...store.sets[idx], name: trimmed };
+        writeLocal(store);
+      }
+      throw error;
+    }
+    return;
+  }
+  const store = readLocal();
+  const idx = store.sets.findIndex((s) => s.id === setId);
+  if (idx >= 0) {
+    store.sets[idx] = { ...store.sets[idx], name: trimmed };
+    writeLocal(store);
+  }
 }
 
 export async function listFlashcardsInSet(setId: string): Promise<FlashcardRow[]> {
@@ -238,21 +272,45 @@ export async function appendCardsToSet(setId: string, cards: FlashcardDraft[]): 
 }
 
 export async function deleteFlashcard(id: string): Promise<void> {
+  await deleteFlashcards([id]);
+}
+
+/** Delete many cards (single round-trip on Supabase). */
+export async function deleteFlashcards(ids: string[]): Promise<void> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return;
+
   const supabase = getSupabaseBrowserClient();
   if (supabase) {
-    const { error } = await supabase.from("flashcards").delete().eq("id", id);
+    const { error } = await supabase.from("flashcards").delete().in("id", unique);
     if (error) {
       console.error(error);
       const store = readLocal();
-      store.cards = store.cards.filter((c) => c.id !== id);
+      const drop = new Set(unique);
+      store.cards = store.cards.filter((c) => !drop.has(c.id));
       writeLocal(store);
       throw error;
     }
     return;
   }
   const store = readLocal();
-  store.cards = store.cards.filter((c) => c.id !== id);
+  const drop = new Set(unique);
+  store.cards = store.cards.filter((c) => !drop.has(c.id));
   writeLocal(store);
+}
+
+/** Set presentation order for all cards in a set. `orderedIds` must list each card in the set exactly once. */
+export async function reorderFlashcardsInSet(setId: string, orderedIds: string[]): Promise<void> {
+  const current = await listFlashcardsInSet(setId);
+  if (current.length !== orderedIds.length) {
+    throw new Error("Cannot reorder: card list no longer matches.");
+  }
+  const cur = new Set(current.map((c) => c.id));
+  for (const id of orderedIds) {
+    if (!cur.has(id)) throw new Error("Cannot reorder: invalid card.");
+  }
+
+  await Promise.all(orderedIds.map((id, position) => updateFlashcard(id, { position })));
 }
 
 export async function updateFlashcard(
