@@ -25,6 +25,24 @@ create index if not exists workspace_files_folder_idx on public.workspace_files 
 alter table public.workspace_folders enable row level security;
 alter table public.workspace_files enable row level security;
 
+drop policy if exists "workspace_folders_select_anon" on public.workspace_folders;
+drop policy if exists "workspace_folders_insert_anon" on public.workspace_folders;
+drop policy if exists "workspace_folders_update_anon" on public.workspace_folders;
+drop policy if exists "workspace_folders_delete_anon" on public.workspace_folders;
+drop policy if exists "workspace_folders_select_authenticated" on public.workspace_folders;
+drop policy if exists "workspace_folders_insert_authenticated" on public.workspace_folders;
+drop policy if exists "workspace_folders_update_authenticated" on public.workspace_folders;
+drop policy if exists "workspace_folders_delete_authenticated" on public.workspace_folders;
+
+drop policy if exists "workspace_files_select_anon" on public.workspace_files;
+drop policy if exists "workspace_files_insert_anon" on public.workspace_files;
+drop policy if exists "workspace_files_update_anon" on public.workspace_files;
+drop policy if exists "workspace_files_delete_anon" on public.workspace_files;
+drop policy if exists "workspace_files_select_authenticated" on public.workspace_files;
+drop policy if exists "workspace_files_insert_authenticated" on public.workspace_files;
+drop policy if exists "workspace_files_update_authenticated" on public.workspace_files;
+drop policy if exists "workspace_files_delete_authenticated" on public.workspace_files;
+
 create policy "workspace_folders_select_anon"
   on public.workspace_folders for select to anon using (true);
 create policy "workspace_folders_insert_anon"
@@ -65,6 +83,15 @@ create policy "workspace_files_delete_authenticated"
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('workspace-files', 'workspace-files', false, 52428800)
 on conflict (id) do update set file_size_limit = excluded.file_size_limit;
+
+drop policy if exists "workspace_storage_select_anon" on storage.objects;
+drop policy if exists "workspace_storage_insert_anon" on storage.objects;
+drop policy if exists "workspace_storage_update_anon" on storage.objects;
+drop policy if exists "workspace_storage_delete_anon" on storage.objects;
+drop policy if exists "workspace_storage_select_authenticated" on storage.objects;
+drop policy if exists "workspace_storage_insert_authenticated" on storage.objects;
+drop policy if exists "workspace_storage_update_authenticated" on storage.objects;
+drop policy if exists "workspace_storage_delete_authenticated" on storage.objects;
 
 create policy "workspace_storage_select_anon"
   on storage.objects for select to anon

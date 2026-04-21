@@ -14,6 +14,15 @@ create index if not exists flashcards_set_id_idx on public.flashcards (set_id);
 
 alter table public.card_sets enable row level security;
 
+drop policy if exists "card_sets_select_anon" on public.card_sets;
+drop policy if exists "card_sets_insert_anon" on public.card_sets;
+drop policy if exists "card_sets_update_anon" on public.card_sets;
+drop policy if exists "card_sets_delete_anon" on public.card_sets;
+drop policy if exists "card_sets_select_authenticated" on public.card_sets;
+drop policy if exists "card_sets_insert_authenticated" on public.card_sets;
+drop policy if exists "card_sets_update_authenticated" on public.card_sets;
+drop policy if exists "card_sets_delete_authenticated" on public.card_sets;
+
 create policy "card_sets_select_anon"
   on public.card_sets for select
   to anon

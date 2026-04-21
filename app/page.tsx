@@ -11,6 +11,7 @@ import { PresentFlashcards } from "@/components/PresentFlashcards";
 import { RenameCollectionModal } from "@/components/RenameCollectionModal";
 import { ReorderCardsModal } from "@/components/ReorderCardsModal";
 import { WorkspaceDocumentsSection } from "@/components/WorkspaceDocumentsSection";
+import { WorkspaceGoogleSheetSection } from "@/components/WorkspaceGoogleSheetSection";
 import {
   deleteFlashcards,
   listCardSets,
@@ -31,7 +32,7 @@ function tileLabel(card: FlashcardRow): string {
   );
 }
 
-type WorkspaceArea = "documents" | "flashcards";
+type WorkspaceArea = "documents" | "flashcards" | "googleSheet";
 
 export default function HomePage() {
   const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>("flashcards");
@@ -69,7 +70,7 @@ export default function HomePage() {
   }, [refresh]);
 
   useEffect(() => {
-    if (workspaceArea === "documents") setPresentOpen(false);
+    if (workspaceArea === "documents" || workspaceArea === "googleSheet") setPresentOpen(false);
   }, [workspaceArea]);
 
   useLayoutEffect(() => {
@@ -252,11 +253,24 @@ export default function HomePage() {
             >
               Flashcards
             </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceArea("googleSheet")}
+              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+                workspaceArea === "googleSheet"
+                  ? "border-pink-600 text-pink-700"
+                  : "border-transparent text-neutral-500 hover:text-pink-600"
+              }`}
+            >
+              Google Sheet
+            </button>
           </nav>
         </header>
 
         {workspaceArea === "documents" ? (
           <WorkspaceDocumentsSection />
+        ) : workspaceArea === "googleSheet" ? (
+          <WorkspaceGoogleSheetSection />
         ) : (
           <>
         {activeSetId && (
