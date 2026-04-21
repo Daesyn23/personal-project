@@ -30,6 +30,10 @@ function colWidthsStorageKey(spreadsheetId: string): string {
   return `workspace_google_sheets_col_widths_${spreadsheetId}`;
 }
 
+function worksheetZoomStorageKey(spreadsheetId: string): string {
+  return `workspace_google_sheets_zoom_${spreadsheetId}`;
+}
+
 const MIN_COL_WIDTH_PX = 40;
 const MAX_COL_WIDTH_PX = 560;
 
@@ -41,6 +45,16 @@ const POLL_MS = 25_000;
 const MAX_ROWS = 400;
 /** Through column AZ (52 cols); wide grade sheets often need AA–AD. */
 const MAX_COLS = 52;
+
+const WORKSHEET_ZOOM_MIN = 0.5;
+const WORKSHEET_ZOOM_MAX = 1.5;
+const WORKSHEET_ZOOM_STEP = 0.1;
+
+function clampWorksheetZoom(raw: number): number {
+  if (!Number.isFinite(raw)) return 1;
+  const z = Math.round(raw * 100) / 100;
+  return Math.min(WORKSHEET_ZOOM_MAX, Math.max(WORKSHEET_ZOOM_MIN, z));
+}
 
 /** Grade % = (x − y) / x × 100, rounded to nearest 0.01 (two decimal places). */
 function parseGradeCount(raw: string): number | null {
@@ -290,6 +304,8 @@ export function WorkspaceGoogleSheetSection() {
   /** Column widths (px); drives colgroup + header + sticky left offsets. Filled from DOM when col count changes, then user-resizable. */
   const [columnWidthsPx, setColumnWidthsPx] = useState<number[]>([]);
   const [measureTick, setMeasureTick] = useState(0);
+  /** View zoom for the worksheet grid only (1 = 100%). Persisted per spreadsheet. */
+  const [worksheetZoom, setWorksheetZoom] = useState(1);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** Bumped after reading localStorage so persist effects run with restored URL/range, not initial "". */
@@ -720,9 +736,10 @@ export function WorkspaceGoogleSheetSection() {
         return;
       }
       const widths: number[] = [];
+      const z = worksheetZoom > 0 ? worksheetZoom : 1;
       tr.querySelectorAll("td").forEach((cell) => {
         const el = cell as HTMLTableCellElement;
-        const w = el.getBoundingClientRect().width;
+        const w = el.getBoundingClientRect().width / z;
         const cs = el.colSpan || 1;
         const each = w / cs;
         for (let j = 0; j < cs; j++) widths.push(each);
@@ -739,7 +756,7 @@ export function WorkspaceGoogleSheetSection() {
     };
     const id = requestAnimationFrame(run);
     return () => cancelAnimationFrame(id);
-  }, [values, colCount, rowCount, frozenThroughCol, sheetMerges, measureTick]);
+  }, [values, colCount, rowCount, frozenThroughCol, sheetMerges, measureTick, worksheetZoom]);
 
   const colStickyLeftPx = useMemo(() => {
     if (colCount === 0 || columnWidthsPx.length !== colCount) return [];
@@ -789,6 +806,33 @@ export function WorkspaceGoogleSheetSection() {
     }
   }, [spreadsheetId, columnWidthsPx, colCount]);
 
+  useEffect(() => {
+    if (!spreadsheetId) {
+      setWorksheetZoom(1);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(worksheetZoomStorageKey(spreadsheetId));
+      if (raw == null || raw === "") {
+        setWorksheetZoom(1);
+        return;
+      }
+      const n = parseFloat(raw);
+      setWorksheetZoom(clampWorksheetZoom(n));
+    } catch {
+      setWorksheetZoom(1);
+    }
+  }, [spreadsheetId]);
+
+  useEffect(() => {
+    if (!spreadsheetId) return;
+    try {
+      localStorage.setItem(worksheetZoomStorageKey(spreadsheetId), String(worksheetZoom));
+    } catch {
+      /* ignore */
+    }
+  }, [spreadsheetId, worksheetZoom]);
+
   const onColumnResizePointerDown = useCallback(
     (e: ReactPointerEvent<HTMLButtonElement>, colIndex: number) => {
       e.preventDefault();
@@ -798,13 +842,14 @@ export function WorkspaceGoogleSheetSection() {
       const pointerId = e.pointerId;
       const startX = e.clientX;
       const startW = columnWidthsPx[colIndex] ?? 72;
+      const z = worksheetZoom > 0 ? worksheetZoom : 1;
       el.setPointerCapture(pointerId);
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
 
       const move = (ev: PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
-        const dx = ev.clientX - startX;
+        const dx = (ev.clientX - startX) / z;
         const nextW = Math.min(MAX_COL_WIDTH_PX, Math.max(MIN_COL_WIDTH_PX, startW + dx));
         setColumnWidthsPx((prev) => {
           if (prev.length !== colCount) return prev;
@@ -831,7 +876,7 @@ export function WorkspaceGoogleSheetSection() {
       el.addEventListener("pointerup", up);
       el.addEventListener("pointercancel", up);
     },
-    [columnWidthsPx, colCount]
+    [columnWidthsPx, colCount, worksheetZoom]
   );
 
   const setCell = (r: number, c: number, v: string) => {
@@ -1300,7 +1345,7 @@ export function WorkspaceGoogleSheetSection() {
               </button>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2">
               <button type="button" onClick={addRow} disabled={loading} className={btnGhost}>
                 Add row
               </button>
@@ -1316,6 +1361,60 @@ export function WorkspaceGoogleSheetSection() {
               <button type="button" onClick={onRefresh} disabled={loading} className={btnNeutral}>
                 Reload from sheet
               </button>
+
+              <div
+                className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-neutral-100 pt-2 sm:ms-0.5 sm:w-auto sm:flex-nowrap sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0"
+                role="group"
+                aria-label="Worksheet zoom"
+              >
+                <span className="shrink-0 text-[11px] font-semibold uppercase leading-none tracking-wide text-neutral-500">
+                  Zoom
+                </span>
+                <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-[min(100%,14rem)] sm:flex-initial">
+                  <button
+                    type="button"
+                    className={`${btnNeutral} inline-flex h-9 w-9 shrink-0 items-center justify-center p-0 text-base font-bold leading-none tabular-nums`}
+                    aria-label="Zoom out"
+                    disabled={loading || worksheetZoom <= WORKSHEET_ZOOM_MIN}
+                    onClick={() =>
+                      setWorksheetZoom((z) =>
+                        clampWorksheetZoom(z - WORKSHEET_ZOOM_STEP)
+                      )
+                    }
+                  >
+                    −
+                  </button>
+                  <input
+                      type="range"
+                      className="worksheet-zoom-range m-0 h-9 w-full min-w-[5rem] flex-1 cursor-pointer appearance-none bg-transparent disabled:opacity-40 [&::-moz-range-thumb]:box-border [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-pink-600 [&::-moz-range-thumb]:shadow-sm [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:border-0 [&::-moz-range-track]:bg-neutral-200/90 [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-neutral-200/90 [&::-webkit-slider-thumb]:-mt-1 [&::-webkit-slider-thumb]:box-border [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-0 [&::-webkit-slider-thumb]:bg-pink-600 [&::-webkit-slider-thumb]:shadow-sm"
+                      aria-label="Worksheet zoom"
+                      min={WORKSHEET_ZOOM_MIN * 100}
+                      max={WORKSHEET_ZOOM_MAX * 100}
+                      step={WORKSHEET_ZOOM_STEP * 100}
+                      value={Math.round(worksheetZoom * 100)}
+                      disabled={loading}
+                      onChange={(e) =>
+                        setWorksheetZoom(clampWorksheetZoom(Number(e.target.value) / 100))
+                      }
+                    />
+                  <button
+                    type="button"
+                    className={`${btnNeutral} inline-flex h-9 w-9 shrink-0 items-center justify-center p-0 text-base font-bold leading-none tabular-nums`}
+                    aria-label="Zoom in"
+                    disabled={loading || worksheetZoom >= WORKSHEET_ZOOM_MAX}
+                    onClick={() =>
+                      setWorksheetZoom((z) =>
+                        clampWorksheetZoom(z + WORKSHEET_ZOOM_STEP)
+                      )
+                    }
+                  >
+                    +
+                  </button>
+                  <span className="inline-flex h-9 w-10 shrink-0 items-center justify-end text-xs tabular-nums text-neutral-500">
+                    {Math.round(worksheetZoom * 100)}%
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1365,6 +1464,7 @@ export function WorkspaceGoogleSheetSection() {
                 Outer grid uses a fixed h-[min(72vh,640px)] so this flex-1 child fills it; inner overflow-auto then scrolls vertically.
               */}
               <div className="min-h-0 flex-1 overflow-auto overscroll-x-contain overscroll-y-contain bg-white [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]">
+                <div style={{ zoom: worksheetZoom } as CSSProperties}>
                 {colCount > 0 && (
                   <div className="sticky top-0 z-[500] isolate border-b border-neutral-200/80 bg-neutral-100">
                     <div
@@ -1508,6 +1608,7 @@ export function WorkspaceGoogleSheetSection() {
                 ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           </div>
