@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  CSSProperties,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { emptyCellPayload, type SheetCellPayload } from "@/lib/google-sheets-grid-parse";
 import { parseSheetGidFromUrl, parseSpreadsheetId } from "@/lib/parse-spreadsheet-url";
 import { sheetCellStyleToCss } from "@/lib/sheet-cell-style-react";
@@ -15,6 +21,17 @@ const DEFAULT_RANGE = "A1:AA200";
 function sheetIdStorageKey(spreadsheetId: string): string {
   return `workspace_google_sheets_sheet_${spreadsheetId}`;
 }
+
+function frozenThroughColStorageKey(spreadsheetId: string): string {
+  return `workspace_google_sheets_frozen_through_${spreadsheetId}`;
+}
+
+function colWidthsStorageKey(spreadsheetId: string): string {
+  return `workspace_google_sheets_col_widths_${spreadsheetId}`;
+}
+
+const MIN_COL_WIDTH_PX = 40;
+const MAX_COL_WIDTH_PX = 560;
 
 /** Whole Linked Google Sheet settings header: collapsed or expanded (localStorage so it survives reload after save). */
 const LS_LINKED_SECTION_COLLAPSED = "workspace_google_sheets_linked_section_collapsed";
@@ -39,6 +56,18 @@ function computeGradePercentString(totalItems: number, mistakes: number): string
   const pct = ((totalItems - mistakes) / totalItems) * 100;
   const rounded = Math.round(pct * 100) / 100;
   return rounded.toFixed(2);
+}
+
+/** A1-style column label (0 → A, 25 → Z, 26 → AA). */
+function columnLetterFromIndex(index: number): string {
+  let n = index + 1;
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
 
 function normalizeRows(values: string[][]): string[][] {
@@ -104,6 +133,10 @@ function SheetDataCell({
   cellCol,
   isSelected,
   onSelectCell,
+  onRequestFreezeMenu,
+  stickyLeftPx,
+  isLastFrozenColumn,
+  rowStripeEven,
 }: {
   value: string;
   payload: SheetCellPayload;
@@ -115,21 +148,55 @@ function SheetDataCell({
   cellCol: number;
   isSelected: boolean;
   onSelectCell: (r: number, c: number) => void;
+  onRequestFreezeMenu: (e: ReactMouseEvent, columnIndex: number) => void;
+  stickyLeftPx: number | null;
+  isLastFrozenColumn: boolean;
+  rowStripeEven: boolean;
 }) {
   const base = sheetCellStyleToCss(payload.baseStyle);
   const rich = payload.richSpans && payload.richSpans.length > 0;
   const rs = rowSpan > 1 ? rowSpan : undefined;
   const cs = colSpan > 1 ? colSpan : undefined;
   const select = () => onSelectCell(cellRow, cellCol);
-  const ringSelected = isSelected ? "ring-2 ring-inset ring-pink-500 z-[1]" : "";
+  const ringSelected = isSelected
+    ? "z-[2] ring-2 ring-inset ring-pink-600 shadow-[inset_0_0_0_9999px_rgba(253,242,248,0.45)]"
+    : "hover:ring-1 hover:ring-inset hover:ring-pink-200/90";
+
+  const fallbackBg = rowStripeEven ? "#ffffff" : "#fff7f8";
+  const stickyBg = base.backgroundColor || fallbackBg;
+
+  const stickyStyle: CSSProperties =
+    stickyLeftPx != null
+      ? {
+          position: "sticky",
+          left: stickyLeftPx,
+          zIndex: 15 + cellCol + (isSelected ? 25 : 0),
+          boxShadow: isLastFrozenColumn
+            ? "1px 0 0 rgba(0,0,0,0.06), 6px 0 14px -2px rgba(0,0,0,0.12)"
+            : undefined,
+          backgroundColor: stickyBg,
+          backgroundImage: `linear-gradient(${stickyBg}, ${stickyBg})`,
+        }
+      : {};
+
+  const openFreezeContext = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onRequestFreezeMenu(e, cellCol);
+  };
 
   return (
     <td
       rowSpan={rs}
       colSpan={cs}
-      className={`relative h-auto w-auto max-w-none border border-neutral-200/70 align-middle p-0 first:border-l-0 last:border-r-0 ${ringSelected}`}
-      style={{ backgroundColor: base.backgroundColor }}
-      onClick={rich ? select : undefined}
+      title="Left-click to select for grade calculator. Right-click for column freeze."
+      className={`relative h-auto min-w-0 max-w-none cursor-pointer overflow-hidden border-b border-r border-neutral-200/70 align-middle px-2 py-1.5 first:border-l first:border-neutral-200/70 ${ringSelected}`}
+      style={{
+        backgroundColor: stickyLeftPx != null ? "#ffffff" : base.backgroundColor,
+        ...stickyStyle,
+      }}
+      onClick={select}
+      onContextMenu={openFreezeContext}
     >
       {rich ? (
         <div
@@ -141,15 +208,17 @@ function SheetDataCell({
               select();
             }
           }}
-          className="min-h-[2rem] min-w-0 cursor-pointer px-2 py-1.5 text-[13px] leading-snug font-sans [field-sizing:content]"
+          className="min-h-[2.75rem] min-w-0 max-w-full cursor-pointer overflow-hidden rounded-md px-1 py-1.5 text-[13px] leading-snug font-sans [field-sizing:content] outline-none focus-visible:ring-2 focus-visible:ring-pink-400 break-words [overflow-wrap:anywhere]"
           style={{
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
+            overflow: "hidden",
             color: base.color,
             fontSize: base.fontSize,
             fontFamily: base.fontFamily,
             textAlign: base.textAlign,
           }}
+          onContextMenu={openFreezeContext}
           title="Click to select this cell for the grade calculator. Mixed styles from Google — edit in Sheets or overwrite from here."
         >
           {payload.richSpans!.map((span, i) => (
@@ -162,13 +231,17 @@ function SheetDataCell({
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onClick={select}
+          onClick={(e) => {
+            e.stopPropagation();
+            select();
+          }}
+          onContextMenu={openFreezeContext}
           onFocus={select}
           style={{
             ...base,
             backgroundColor: base.backgroundColor ? "transparent" : undefined,
           }}
-          className="box-border min-h-[2rem] min-w-[2.75ch] max-w-[min(36rem,90vw)] px-2 py-1.5 text-[13px] font-sans tabular-nums text-neutral-900 outline-none transition [field-sizing:content] placeholder:text-neutral-400 focus:bg-pink-50/30 focus:ring-2 focus:ring-inset focus:ring-pink-300/70"
+          className="box-border min-h-[2.75rem] min-w-0 w-full max-w-full cursor-text rounded-md px-2 py-2 text-[13px] font-sans tabular-nums text-neutral-900 outline-none transition [field-sizing:content] placeholder:text-neutral-400 focus:bg-pink-50/40 focus:ring-2 focus:ring-inset focus:ring-pink-400/80"
           aria-label={ariaLabel}
         />
       )}
@@ -210,6 +283,13 @@ export function WorkspaceGoogleSheetSection() {
   const [gradeTotalItems, setGradeTotalItems] = useState("");
   const [gradeMistakes, setGradeMistakes] = useState("");
   const [gradeCalcError, setGradeCalcError] = useState<string | null>(null);
+
+  /** Last column index (0-based) included in horizontal sticky freeze; null = none. */
+  const [frozenThroughCol, setFrozenThroughCol] = useState<number | null>(null);
+  const tableMeasureRef = useRef<HTMLTableElement>(null);
+  /** Column widths (px); drives colgroup + header + sticky left offsets. Filled from DOM when col count changes, then user-resizable. */
+  const [columnWidthsPx, setColumnWidthsPx] = useState<number[]>([]);
+  const [measureTick, setMeasureTick] = useState(0);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** Bumped after reading localStorage so persist effects run with restored URL/range, not initial "". */
@@ -508,6 +588,14 @@ export function WorkspaceGoogleSheetSection() {
   const colCount = values.length ? values[0].length : 0;
   const rowCount = values.length;
 
+  const showWorksheetGrid = Boolean(
+    status?.canQuery &&
+      spreadsheetId &&
+      !idLooksIncomplete &&
+      (!needsTabForCells || effectiveSheetGid != null) &&
+      (values.length > 0 || loading)
+  );
+
   const mergeMask = useMemo(
     () => buildMergeRenderMask(rowCount, colCount, sheetMerges),
     [rowCount, colCount, sheetMerges]
@@ -525,6 +613,46 @@ export function WorkspaceGoogleSheetSection() {
     setGradeCalcError(null);
   }, []);
 
+  const [freezeColumnMenu, setFreezeColumnMenu] = useState<{
+    x: number;
+    y: number;
+    col: number;
+  } | null>(null);
+  const freezeColumnMenuRef = useRef<HTMLDivElement>(null);
+
+  const openFreezeColumnMenu = useCallback((e: ReactMouseEvent, col: number) => {
+    setFreezeColumnMenu({ x: e.clientX, y: e.clientY, col });
+  }, []);
+
+  useEffect(() => {
+    if (!freezeColumnMenu) return;
+    const onDown = (ev: globalThis.MouseEvent) => {
+      if (freezeColumnMenuRef.current?.contains(ev.target as Node)) return;
+      setFreezeColumnMenu(null);
+    };
+    const onEsc = (ev: globalThis.KeyboardEvent) => {
+      if (ev.key === "Escape") setFreezeColumnMenu(null);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onEsc, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onEsc, true);
+    };
+  }, [freezeColumnMenu]);
+
+  const freezeMenuLayout = useMemo(() => {
+    if (!freezeColumnMenu || typeof window === "undefined") return null;
+    const w = 280;
+    const h = 120;
+    return {
+      left: Math.max(8, Math.min(freezeColumnMenu.x, window.innerWidth - w - 8)),
+      top: Math.max(8, Math.min(freezeColumnMenu.y, window.innerHeight - h - 8)),
+      colLetter: columnLetterFromIndex(freezeColumnMenu.col),
+      colIndex: freezeColumnMenu.col,
+    };
+  }, [freezeColumnMenu]);
+
   useEffect(() => {
     setSelectedCell((prev) => {
       if (!prev) return null;
@@ -532,6 +660,179 @@ export function WorkspaceGoogleSheetSection() {
       return prev;
     });
   }, [rowCount, colCount]);
+
+  useEffect(() => {
+    setFrozenThroughCol((prev) => {
+      if (prev == null) return null;
+      if (colCount === 0) return null;
+      if (prev >= colCount) return colCount - 1;
+      return prev;
+    });
+  }, [colCount]);
+
+  useEffect(() => {
+    if (!spreadsheetId) {
+      setFrozenThroughCol(null);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(frozenThroughColStorageKey(spreadsheetId));
+      if (raw == null || raw === "") {
+        setFrozenThroughCol(null);
+        return;
+      }
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n) && n >= 0) setFrozenThroughCol(n);
+    } catch {
+      /* ignore */
+    }
+  }, [spreadsheetId]);
+
+  useEffect(() => {
+    if (!spreadsheetId) return;
+    try {
+      if (frozenThroughCol == null) {
+        localStorage.removeItem(frozenThroughColStorageKey(spreadsheetId));
+      } else {
+        localStorage.setItem(frozenThroughColStorageKey(spreadsheetId), String(frozenThroughCol));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [spreadsheetId, frozenThroughCol]);
+
+  useEffect(() => {
+    const onResize = () => setMeasureTick((t) => t + 1);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useLayoutEffect(() => {
+    const table = tableMeasureRef.current;
+    if (!table || colCount === 0) {
+      setColumnWidthsPx([]);
+      return;
+    }
+    const run = () => {
+      const tr = table.tBodies[0]?.rows[0] ?? null;
+      if (!tr) {
+        setColumnWidthsPx([]);
+        return;
+      }
+      const widths: number[] = [];
+      tr.querySelectorAll("td").forEach((cell) => {
+        const el = cell as HTMLTableCellElement;
+        const w = el.getBoundingClientRect().width;
+        const cs = el.colSpan || 1;
+        const each = w / cs;
+        for (let j = 0; j < cs; j++) widths.push(each);
+      });
+      while (widths.length < colCount) widths.push(72);
+      const mw = widths
+        .slice(0, colCount)
+        .map((w) => Math.min(MAX_COL_WIDTH_PX, Math.max(MIN_COL_WIDTH_PX, w)));
+
+      setColumnWidthsPx((prev) => {
+        if (prev.length !== colCount) return mw;
+        return prev;
+      });
+    };
+    const id = requestAnimationFrame(run);
+    return () => cancelAnimationFrame(id);
+  }, [values, colCount, rowCount, frozenThroughCol, sheetMerges, measureTick]);
+
+  const colStickyLeftPx = useMemo(() => {
+    if (colCount === 0 || columnWidthsPx.length !== colCount) return [];
+    const lefts: number[] = [];
+    let acc = 0;
+    for (let c = 0; c < colCount; c++) {
+      lefts.push(acc);
+      acc += columnWidthsPx[c] ?? 0;
+    }
+    return lefts;
+  }, [columnWidthsPx, colCount]);
+
+  const tableBodyWidthPx = useMemo(() => {
+    if (columnWidthsPx.length !== colCount) return 0;
+    return columnWidthsPx.reduce((s, w) => s + w, 0);
+  }, [columnWidthsPx, colCount]);
+
+  /** Alias for readability in markup (same as `columnWidthsPx`). */
+  const colWidthsPx = columnWidthsPx;
+
+  useEffect(() => {
+    if (!spreadsheetId) return;
+    try {
+      const raw = localStorage.getItem(colWidthsStorageKey(spreadsheetId));
+      if (!raw) return;
+      const arr = JSON.parse(raw) as unknown;
+      if (!Array.isArray(arr)) return;
+      const nums = arr.map((x) => Number(x)).filter((n) => Number.isFinite(n));
+      if (nums.length === 0) return;
+      setColumnWidthsPx((prev) => {
+        if (colCount > 0 && nums.length === colCount) {
+          return nums.map((n) => Math.min(MAX_COL_WIDTH_PX, Math.max(MIN_COL_WIDTH_PX, n)));
+        }
+        return prev;
+      });
+    } catch {
+      /* ignore */
+    }
+  }, [spreadsheetId, colCount]);
+
+  useEffect(() => {
+    if (!spreadsheetId || columnWidthsPx.length === 0 || columnWidthsPx.length !== colCount) return;
+    try {
+      localStorage.setItem(colWidthsStorageKey(spreadsheetId), JSON.stringify(columnWidthsPx));
+    } catch {
+      /* ignore */
+    }
+  }, [spreadsheetId, columnWidthsPx, colCount]);
+
+  const onColumnResizePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLButtonElement>, colIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (columnWidthsPx.length !== colCount) return;
+      const el = e.currentTarget;
+      const pointerId = e.pointerId;
+      const startX = e.clientX;
+      const startW = columnWidthsPx[colIndex] ?? 72;
+      el.setPointerCapture(pointerId);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const move = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        const dx = ev.clientX - startX;
+        const nextW = Math.min(MAX_COL_WIDTH_PX, Math.max(MIN_COL_WIDTH_PX, startW + dx));
+        setColumnWidthsPx((prev) => {
+          if (prev.length !== colCount) return prev;
+          const next = [...prev];
+          if (next[colIndex] === nextW) return prev;
+          next[colIndex] = nextW;
+          return next;
+        });
+      };
+      const up = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        try {
+          el.releasePointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", up);
+        el.removeEventListener("pointercancel", up);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerup", up);
+      el.addEventListener("pointercancel", up);
+    },
+    [columnWidthsPx, colCount]
+  );
 
   const setCell = (r: number, c: number, v: string) => {
     setValues((prev) => {
@@ -675,7 +976,7 @@ export function WorkspaceGoogleSheetSection() {
     "rounded-xl border border-neutral-200/90 bg-white px-3.5 py-2 text-xs font-semibold text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-50 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-40";
 
   return (
-    <div className="min-w-0 space-y-6">
+    <div className="min-w-0 max-w-full space-y-6">
       <div
         className={`relative overflow-hidden rounded-2xl border border-pink-200/60 bg-white/95 shadow-lg shadow-pink-200/25 ring-1 ring-pink-100/50 transition-shadow ${saveFlash ? "shadow-emerald-100/30 ring-2 ring-emerald-400/70" : ""}`}
       >
@@ -928,6 +1229,15 @@ export function WorkspaceGoogleSheetSection() {
         )}
 
         <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+          {loading && spreadsheetId && (
+            <span className="inline-flex items-center gap-1.5 font-semibold text-pink-800">
+              <span
+                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-pink-200 border-t-pink-600"
+                aria-hidden
+              />
+              Loading sheet…
+            </span>
+          )}
           {lastSynced && (
             <span>
               Last synced: {lastSynced.toLocaleString()}
@@ -944,8 +1254,8 @@ export function WorkspaceGoogleSheetSection() {
         </div>
       </div>
 
-      {status?.canQuery && spreadsheetId && values.length > 0 && (
-        <div className="relative overflow-hidden rounded-2xl border border-neutral-200/80 bg-white shadow-lg shadow-neutral-200/30 ring-1 ring-pink-100/40">
+      {showWorksheetGrid && (
+        <div className="relative min-w-0 max-w-full overflow-clip rounded-2xl border border-neutral-200/80 bg-white shadow-lg shadow-neutral-200/30 ring-1 ring-pink-100/40">
           <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-pink-400 via-rose-400 to-fuchsia-400 opacity-80" aria-hidden />
           <div className="border-b border-neutral-100/95 bg-gradient-to-r from-neutral-50/90 to-white px-5 py-4 sm:px-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -953,13 +1263,25 @@ export function WorkspaceGoogleSheetSection() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Spreadsheet</p>
                 <h3 className="mt-0.5 text-lg font-bold text-neutral-900">Worksheet grid</h3>
                 <p className="mt-1 text-sm text-neutral-600">
-                  <span className="font-medium text-neutral-800">{activeSheetTitle ?? "Sheet"}</span>
-                  <span className="text-neutral-400"> · </span>
-                  <span className="font-mono text-xs text-pink-900">{rangeCellsOnly}</span>
-                  <span className="text-neutral-400"> · </span>
-                  {rowCount}×{colCount}
-                  {sheetMerges.length > 0 && (
-                    <span className="text-neutral-500"> · {sheetMerges.length} merged region(s)</span>
+                  {loading && values.length === 0 ? (
+                    <span className="inline-flex items-center gap-2 font-medium text-pink-800">
+                      <span
+                        className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-pink-200 border-t-pink-600"
+                        aria-hidden
+                      />
+                      Loading cells from Google…
+                    </span>
+                  ) : (
+                    <>
+                      <span className="font-medium text-neutral-800">{activeSheetTitle ?? "Sheet"}</span>
+                      <span className="text-neutral-400"> · </span>
+                      <span className="font-mono text-xs text-pink-900">{rangeCellsOnly}</span>
+                      <span className="text-neutral-400"> · </span>
+                      {rowCount}×{colCount}
+                      {sheetMerges.length > 0 && (
+                        <span className="text-neutral-500"> · {sheetMerges.length} merged region(s)</span>
+                      )}
+                    </>
                   )}
                 </p>
               </div>
@@ -967,6 +1289,7 @@ export function WorkspaceGoogleSheetSection() {
                 type="button"
                 disabled={
                   saving ||
+                  loading ||
                   values.length === 0 ||
                   (needsTabForCells && effectiveSheetGid == null)
                 }
@@ -978,35 +1301,184 @@ export function WorkspaceGoogleSheetSection() {
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" onClick={addRow} className={btnGhost}>
+              <button type="button" onClick={addRow} disabled={loading} className={btnGhost}>
                 Add row
               </button>
-              <button type="button" onClick={addColumn} className={btnGhost}>
+              <button type="button" onClick={addColumn} disabled={loading} className={btnGhost}>
                 Add column
               </button>
-              <button type="button" onClick={removeLastRow} disabled={rowCount <= 1} className={btnNeutral}>
+              <button type="button" onClick={removeLastRow} disabled={loading || rowCount <= 1} className={btnNeutral}>
                 Remove last row
               </button>
-              <button type="button" onClick={removeLastColumn} disabled={colCount <= 1} className={btnNeutral}>
+              <button type="button" onClick={removeLastColumn} disabled={loading || colCount <= 1} className={btnNeutral}>
                 Remove last column
               </button>
-              <button type="button" onClick={onRefresh} className={btnNeutral}>
+              <button type="button" onClick={onRefresh} disabled={loading} className={btnNeutral}>
                 Reload from sheet
               </button>
             </div>
           </div>
 
-          <div className="min-h-0 w-full min-w-0 max-h-[min(72vh,640px)] overflow-x-auto overflow-y-auto overscroll-x-contain bg-gradient-to-b from-neutral-50/40 to-white p-3 sm:p-4 [-webkit-overflow-scrolling:touch]">
-            <table className="w-max min-w-full border-collapse text-sm">
-              <tbody>
+          <div className="relative min-h-0 w-full">
+            {loading && values.length > 0 && (
+              <div
+                className="absolute inset-0 z-[600] flex flex-col items-center justify-center gap-3 bg-white/80 backdrop-blur-[1px]"
+                role="status"
+                aria-live="polite"
+                aria-label="Loading spreadsheet"
+              >
+                <span
+                  className="h-11 w-11 animate-spin rounded-full border-[3px] border-pink-100 border-t-pink-600"
+                  aria-hidden
+                />
+                <p className="text-sm font-semibold text-neutral-800">Refreshing from Google…</p>
+              </div>
+            )}
+
+            {values.length === 0 && loading ? (
+              <div className="flex min-h-[min(52vh,520px)] flex-col items-center justify-center gap-4 border-t border-neutral-200/80 bg-gradient-to-b from-neutral-50/90 to-white px-6 py-16">
+                <span
+                  className="h-12 w-12 animate-spin rounded-full border-[3px] border-pink-100 border-t-pink-600"
+                  aria-hidden
+                />
+                <p className="text-center text-base font-semibold text-neutral-800">Loading spreadsheet…</p>
+                <p className="max-w-md text-center text-sm text-neutral-600">
+                  Pulling range <span className="font-mono text-pink-900">{rangeCellsOnly}</span>
+                  {activeSheetTitle ? (
+                    <>
+                      {" "}
+                      from <span className="font-medium text-neutral-800">{activeSheetTitle}</span>
+                    </>
+                  ) : null}
+                  .
+                </p>
+                <div className="mt-4 w-full max-w-md space-y-2" aria-hidden>
+                  <div className="h-2 animate-pulse rounded-full bg-pink-100/80" />
+                  <div className="h-2 w-[92%] animate-pulse rounded-full bg-pink-50/90" />
+                  <div className="h-2 w-[78%] animate-pulse rounded-full bg-pink-50/80" />
+                </div>
+              </div>
+            ) : (
+          <div className="flex h-[min(72vh,640px)] min-h-0 w-full min-w-0 max-w-full flex-col border-t border-neutral-200/80 bg-white isolate [-webkit-overflow-scrolling:touch]">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 pb-3 pt-1 sm:px-4 sm:pb-4">
+              {/*
+                Outer grid uses a fixed h-[min(72vh,640px)] so this flex-1 child fills it; inner overflow-auto then scrolls vertically.
+              */}
+              <div className="min-h-0 flex-1 overflow-auto overscroll-x-contain overscroll-y-contain bg-white [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]">
+                {colCount > 0 && (
+                  <div className="sticky top-0 z-[500] isolate border-b border-neutral-200/80 bg-neutral-100">
+                    <div
+                      className="flex min-w-full bg-neutral-100"
+                      style={
+                        tableBodyWidthPx > 0
+                          ? { width: `${tableBodyWidthPx}px`, minWidth: "100%" }
+                          : { minWidth: "100%" }
+                      }
+                    >
+                      {Array.from({ length: colCount }, (_, ci) => {
+                        const w = colWidthsPx[ci] ?? 72;
+                        const canStick = colStickyLeftPx.length >= colCount;
+                        const inFrozen =
+                          frozenThroughCol != null && ci <= frozenThroughCol && canStick;
+                        const cellStyle: CSSProperties = {
+                          width: w,
+                          minWidth: w,
+                          maxWidth: w,
+                          flex: "0 0 auto",
+                          backgroundColor: inFrozen ? "#e5e5e5" : "#f5f5f5",
+                          ...(inFrozen
+                            ? {
+                                position: "sticky",
+                                left: colStickyLeftPx[ci] ?? 0,
+                                zIndex: 60 + ci,
+                                boxShadow:
+                                  frozenThroughCol === ci
+                                    ? "1px 0 0 rgba(0,0,0,0.06), 6px 0 14px -2px rgba(0,0,0,0.12)"
+                                    : undefined,
+                              }
+                            : {}),
+                        };
+                        return (
+                          <div
+                            key={ci}
+                            role="columnheader"
+                            className="relative box-border overflow-hidden border-t border-b border-r border-neutral-200/80 bg-clip-padding px-2 py-1.5 text-center first:border-l first:border-neutral-200/80"
+                            style={cellStyle}
+                          >
+                            <span
+                              className={`inline-flex min-h-[1.75rem] min-w-[2rem] cursor-[context-menu] select-none items-center justify-center rounded-md px-2 py-1 font-mono text-[11px] font-bold ${
+                                frozenThroughCol === ci
+                                  ? "bg-pink-600 text-white shadow-sm"
+                                  : "text-neutral-700"
+                              }`}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openFreezeColumnMenu(e, ci);
+                              }}
+                              title={`Column ${columnLetterFromIndex(ci)} — right-click to freeze; drag right edge to resize`}
+                            >
+                              {columnLetterFromIndex(ci)}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`Resize column ${columnLetterFromIndex(ci)}`}
+                              title="Drag to resize column"
+                              className="absolute bottom-0 right-0 top-0 z-[80] w-2 translate-x-1/2 cursor-col-resize border-0 bg-transparent p-0 hover:bg-pink-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
+                              onPointerDown={(ev) => onColumnResizePointerDown(ev, ci)}
+                              onClick={(ev) => ev.preventDefault()}
+                              onContextMenu={(ev) => {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <table
+                  ref={tableMeasureRef}
+                  className="min-w-full border-separate border-spacing-0 text-sm"
+                  style={
+                    tableBodyWidthPx > 0 && colWidthsPx.length === colCount
+                      ? {
+                          width: tableBodyWidthPx,
+                          minWidth: "100%",
+                          tableLayout: "fixed",
+                        }
+                      : { minWidth: "100%" }
+                  }
+                >
+                  {colWidthsPx.length === colCount && (
+                    <colgroup>
+                      {colWidthsPx.map((w, i) => (
+                        <col key={i} style={{ width: `${w}px` }} />
+                      ))}
+                    </colgroup>
+                  )}
+                  <tbody>
                 {values.map((row, ri) => (
                   <tr
                     key={ri}
-                    className={`border-b border-neutral-100 transition-colors ${ri % 2 === 0 ? "bg-white" : "bg-rose-50/[0.35]"}`}
+                    className={`transition-colors ${ri % 2 === 0 ? "bg-white" : "bg-rose-50/[0.35]"}`}
                   >
                     {row.map((cell, ci) => {
                       if (mergeMask.covered[ri]?.[ci]) return null;
                       const span = mergeMask.anchor[ri]?.[ci];
+                      const canStick = colStickyLeftPx.length >= colCount;
+                      const cellColSpan = span?.colSpan ?? 1;
+                      /** A merged cell that extends past the frozen range would pin a wide banner across the viewport — let it scroll naturally. */
+                      const mergeExtendsBeyondFrozen =
+                        frozenThroughCol != null && ci + cellColSpan - 1 > frozenThroughCol;
+                      const inFrozen =
+                        frozenThroughCol != null &&
+                        ci <= frozenThroughCol &&
+                        canStick &&
+                        !mergeExtendsBeyondFrozen;
+                      const sl = inFrozen ? colStickyLeftPx[ci] ?? 0 : null;
                       return (
                         <SheetDataCell
                           key={`${ri}-${ci}`}
@@ -1016,6 +1488,10 @@ export function WorkspaceGoogleSheetSection() {
                           cellCol={ci}
                           isSelected={selectedCell?.r === ri && selectedCell?.c === ci}
                           onSelectCell={handleSelectCell}
+                          onRequestFreezeMenu={openFreezeColumnMenu}
+                          stickyLeftPx={inFrozen ? sl : null}
+                          isLastFrozenColumn={Boolean(inFrozen && frozenThroughCol === ci)}
+                          rowStripeEven={ri % 2 === 0}
                           value={cell}
                           payload={
                             cellMeta[ri]?.[ci] ?? {
@@ -1030,8 +1506,12 @@ export function WorkspaceGoogleSheetSection() {
                     })}
                   </tr>
                 ))}
-              </tbody>
-            </table>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+            )}
           </div>
         </div>
       )}
@@ -1125,6 +1605,43 @@ export function WorkspaceGoogleSheetSection() {
           )}
         </div>
       </div>
+
+      {freezeMenuLayout != null &&
+        createPortal(
+          <div
+            ref={freezeColumnMenuRef}
+            role="menu"
+            aria-label="Column freeze"
+            className="fixed z-[9999] w-[17.5rem] overflow-hidden rounded-xl border border-neutral-200/90 bg-white py-1 text-sm shadow-2xl shadow-neutral-900/25 ring-1 ring-neutral-100/80"
+            style={{ left: freezeMenuLayout.left, top: freezeMenuLayout.top }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full px-3 py-2.5 text-left text-neutral-800 transition hover:bg-pink-50/90"
+              onClick={() => {
+                setFrozenThroughCol(freezeMenuLayout.colIndex);
+                setFreezeColumnMenu(null);
+              }}
+            >
+              Freeze through column{" "}
+              <span className="font-mono font-semibold text-pink-700">{freezeMenuLayout.colLetter}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={frozenThroughCol == null}
+              className="w-full px-3 py-2.5 text-left text-neutral-800 transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => {
+                setFrozenThroughCol(null);
+                setFreezeColumnMenu(null);
+              }}
+            >
+              Clear column freeze
+            </button>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
