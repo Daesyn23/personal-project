@@ -1,4 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+/** Single shared row for all app users (anon key). */
+const GLOBAL_SETTINGS_ROW_ID = "global" as const;
 import {
   normalizeLink,
   readActiveLinkId,
@@ -290,13 +293,10 @@ export function normalizeWorkspaceGoogleSheetsState(raw: unknown): WorkspaceGoog
 export async function pullWorkspaceGoogleSheetsSettings(
   supabase: SupabaseClient
 ): Promise<{ state: WorkspaceGoogleSheetsStateV1; updatedAt: string } | null> {
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData.user) return null;
-
   const { data, error } = await supabase
     .from("workspace_google_sheets_settings")
     .select("state, updated_at")
-    .eq("user_id", userData.user.id)
+    .eq("id", GLOBAL_SETTINGS_ROW_ID)
     .maybeSingle();
 
   if (error) {
@@ -356,19 +356,16 @@ export async function pushWorkspaceGoogleSheetsSettings(
   supabase: SupabaseClient,
   state: WorkspaceGoogleSheetsStateV1
 ): Promise<{ updatedAt: string } | null> {
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData.user) return null;
-
   const nowIso = new Date().toISOString();
   const { data, error } = await supabase
     .from("workspace_google_sheets_settings")
     .upsert(
       {
-        user_id: userData.user.id,
+        id: GLOBAL_SETTINGS_ROW_ID,
         state,
         updated_at: nowIso,
       },
-      { onConflict: "user_id" }
+      { onConflict: "id" }
     )
     .select("updated_at")
     .single();

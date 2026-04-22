@@ -7,8 +7,6 @@ import type {
 } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { User } from "@supabase/supabase-js";
-import { WorkspaceSheetsAccountBar } from "@/components/WorkspaceSheetsAccountBar";
 import { SavedGoogleSheetCard } from "@/components/SavedGoogleSheetCard";
 import { emptyCellPayload, type SheetCellPayload } from "@/lib/google-sheets-grid-parse";
 import {
@@ -345,7 +343,6 @@ export function WorkspaceGoogleSheetSection() {
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloudPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [authUser, setAuthUser] = useState<User | null>(null);
   const [cloudApplyEpoch, setCloudApplyEpoch] = useState(0);
   const collectArgsRef = useRef<CollectSheetsStateArgs>({
     activeSpreadsheetId: null,
@@ -404,18 +401,6 @@ export function WorkspaceGoogleSheetSection() {
     });
   }, []);
 
-  useEffect(() => {
-    const sb = getSupabaseBrowserClient();
-    if (!sb) return;
-    void sb.auth.getSession().then(({ data: { session } }) => {
-      setAuthUser(session?.user ?? null);
-    });
-    const { data } = sb.auth.onAuthStateChange((_event, session) => {
-      setAuthUser(session?.user ?? null);
-    });
-    return () => data.subscription.unsubscribe();
-  }, []);
-
   const applyLinksAndActive = useCallback((links: SavedGoogleSheetLink[], aid: string | null) => {
     let nextAid = aid;
     if (nextAid && !links.some((l) => l.id === nextAid)) nextAid = null;
@@ -449,12 +434,9 @@ export function WorkspaceGoogleSheetSection() {
         worksheetZoom: 1,
       };
 
-      if (sb) {
-        const { data: sessionData } = await sb.auth.getSession();
-        if (!cancelled && sessionData.session?.user) {
-          const { appliedRemote } = await syncWorkspaceSheetsWithSupabase(sb, emptyCollect);
-          if (!cancelled && appliedRemote) setCloudApplyEpoch((e) => e + 1);
-        }
+      if (sb && !cancelled) {
+        const { appliedRemote } = await syncWorkspaceSheetsWithSupabase(sb, emptyCollect);
+        if (!cancelled && appliedRemote) setCloudApplyEpoch((e) => e + 1);
       }
 
       if (cancelled) return;
@@ -698,25 +680,7 @@ export function WorkspaceGoogleSheetSection() {
   }, [spreadsheetId, selectedSheetId, frozenThroughCol, columnWidthsPx, colCount, worksheetZoom]);
 
   useEffect(() => {
-    if (!authUser || !linksReady) return;
-    const sb = getSupabaseBrowserClient();
-    if (!sb) return;
-    let cancelled = false;
-    void (async () => {
-      const { appliedRemote } = await syncWorkspaceSheetsWithSupabase(sb, collectArgsRef.current);
-      if (cancelled || !appliedRemote) return;
-      setCloudApplyEpoch((e) => e + 1);
-      const links = loadLinksWithMigration();
-      setSheetLinks(links);
-      applyLinksAndActive(links, readActiveLinkId());
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authUser, linksReady, applyLinksAndActive]);
-
-  useEffect(() => {
-    if (!linksReady || !authUser) return;
+    if (!linksReady) return;
     const sb = getSupabaseBrowserClient();
     if (!sb) return;
     bumpLocalSheetsMutation();
@@ -734,7 +698,6 @@ export function WorkspaceGoogleSheetSection() {
     };
   }, [
     linksReady,
-    authUser,
     sheetLinks,
     activeLinkId,
     spreadsheetId,
@@ -1394,11 +1357,6 @@ export function WorkspaceGoogleSheetSection() {
 
   return (
     <div className="min-w-0 max-w-full space-y-6">
-      {linksReady && (
-        <div className="space-y-2">
-          <WorkspaceSheetsAccountBar user={authUser} />
-        </div>
-      )}
       {!linksReady ? (
         <div className="flex items-center justify-center gap-3 rounded-2xl border border-pink-100/80 bg-white/90 px-6 py-14 text-sm text-neutral-600 shadow-sm">
           <span
