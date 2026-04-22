@@ -1250,7 +1250,7 @@ export function WorkspaceGoogleSheetSection() {
       setSelectedCell(null);
       setFreezeColumnMenu(null);
     },
-    [activeLinkId, dirty, sheetLinks, flushActiveLinkToStore, spreadsheetInput, range, importFormatting]
+    [activeLinkId, dirty, sheetLinks, flushActiveLinkToStore]
   );
 
   const removeSheetLink = useCallback(
@@ -1284,7 +1284,7 @@ export function WorkspaceGoogleSheetSection() {
         setImportFormatting(true);
       }
     },
-    [activeLinkId, dirty, flushActiveLinkToStore, spreadsheetInput, range, importFormatting]
+    [activeLinkId, dirty, flushActiveLinkToStore]
   );
 
   const submitNewSheetLink = useCallback(() => {

@@ -40,11 +40,13 @@ const FINISH_ALARM_SECONDS = 5;
 
 /** ~5s soft repeating tones when the countdown completes — even level (no fade), Web Audio. */
 function playTimerFinishedChime() {
-  type WinAudio = Window & { webkitAudioContext?: typeof AudioContext };
-  const AC = typeof window === "undefined" ? null : (window as WinAudio).AudioContext ?? (window as WinAudio).webkitAudioContext;
-  if (!AC) return;
+  if (typeof window === "undefined") return;
+  const Ctor =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return;
   try {
-    const ctx = new AC();
+    const ctx = new Ctor();
     const peak = 0.038;
     const beep = (freq: number, t0: number, len: number) => {
       const osc = ctx.createOscillator();

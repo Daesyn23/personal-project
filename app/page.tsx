@@ -191,7 +191,7 @@ export default function HomePage() {
         setReorderSaving(false);
       }
     },
-    [activeSetId, cards]
+    [activeSetId, cards, refresh]
   );
 
   const activeSetName = sets.find((s) => s.id === activeSetId)?.name;
