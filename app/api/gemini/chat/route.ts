@@ -1,6 +1,10 @@
 import { GoogleGenerativeAI, type Content } from "@google/generative-ai";
 import { NextResponse } from "next/server";
-import { resolveGeminiModelId } from "@/lib/gemini-model";
+import {
+  geminiModelAttemptOrder,
+  resolveGeminiModelId,
+  shouldAttemptNextGeminiModel,
+} from "@/lib/gemini-model";
 
 export const runtime = "nodejs";
 
@@ -72,27 +76,42 @@ export async function POST(req: Request) {
     parts: [{ text: m.content }],
   }));
 
-  const modelName = resolveGeminiModelId(process.env.GEMINI_MODEL);
+  const primaryModel = resolveGeminiModelId(process.env.GEMINI_MODEL);
+  const modelAttempts = geminiModelAttemptOrder(primaryModel);
+  const genAI = new GoogleGenerativeAI(key);
 
-  try {
-    const genAI = new GoogleGenerativeAI(key);
-    const model = genAI.getGenerativeModel({
-      model: modelName,
-      ...(systemInstruction ? { systemInstruction } : {}),
-    });
-    const chat = model.startChat({ history });
-    const result = await chat.sendMessage(last.content);
-    const text = result.response.text();
-    if (!text?.trim()) {
-      return NextResponse.json({ error: "Empty model response." }, { status: 502 });
+  for (let i = 0; i < modelAttempts.length; i++) {
+    const modelName = modelAttempts[i]!;
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        ...(systemInstruction ? { systemInstruction } : {}),
+      });
+      const chat = model.startChat({ history });
+      const result = await chat.sendMessage(last.content);
+      const text = result.response.text();
+      if (!text?.trim()) {
+        const emptyErr = new Error("Empty model response.");
+        if (i < modelAttempts.length - 1 && shouldAttemptNextGeminiModel(emptyErr)) {
+          continue;
+        }
+        return NextResponse.json({ error: "Empty model response." }, { status: 502 });
+      }
+      return NextResponse.json({ text, model: modelName });
+    } catch (e) {
+      const canTryNext = i < modelAttempts.length - 1 && shouldAttemptNextGeminiModel(e);
+      if (canTryNext) {
+        console.warn(`[gemini/chat] model ${modelName} failed, trying fallback:`, e);
+        continue;
+      }
+      let msg = e instanceof Error ? e.message : "Gemini request failed.";
+      if (msg.includes("404") && msg.includes("not found")) {
+        msg += ` Tried: ${modelAttempts.join(", ")}. Set GEMINI_MODEL to a current id in .env.local or check API access.`;
+      }
+      console.error("[gemini/chat]", e);
+      return NextResponse.json({ error: msg }, { status: 502 });
     }
-    return NextResponse.json({ text });
-  } catch (e) {
-    let msg = e instanceof Error ? e.message : "Gemini request failed.";
-    if (msg.includes("404") && msg.includes("not found")) {
-      msg += ` Set GEMINI_MODEL to a current id (e.g. gemini-2.0-flash or gemini-2.5-flash) in .env.local and restart.`;
-    }
-    console.error("[gemini/chat]", e);
-    return NextResponse.json({ error: msg }, { status: 502 });
   }
+
+  return NextResponse.json({ error: "No Gemini model candidates." }, { status: 500 });
 }

@@ -7,6 +7,8 @@ import type {
 } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { User } from "@supabase/supabase-js";
+import { WorkspaceSheetsAccountBar } from "@/components/WorkspaceSheetsAccountBar";
 import { SavedGoogleSheetCard } from "@/components/SavedGoogleSheetCard";
 import { emptyCellPayload, type SheetCellPayload } from "@/lib/google-sheets-grid-parse";
 import {
@@ -19,6 +21,15 @@ import {
   writeActiveLinkId,
   writeSavedSheetLinks,
 } from "@/lib/google-sheets-links";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  bumpLocalSheetsMutation,
+  collectWorkspaceGoogleSheetsState,
+  markSheetsSyncedFromServer,
+  pushWorkspaceGoogleSheetsSettings,
+  syncWorkspaceSheetsWithSupabase,
+  type CollectSheetsStateArgs,
+} from "@/lib/workspace-google-sheets-sync";
 import { parseSheetGidFromUrl, parseSpreadsheetId } from "@/lib/parse-spreadsheet-url";
 import { sheetCellStyleToCss } from "@/lib/sheet-cell-style-react";
 import type { SheetMergeCell } from "@/lib/sheet-merge-localize";
@@ -333,6 +344,17 @@ export function WorkspaceGoogleSheetSection() {
   const [linkConnectionError, setLinkConnectionError] = useState<string | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cloudPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [cloudApplyEpoch, setCloudApplyEpoch] = useState(0);
+  const collectArgsRef = useRef<CollectSheetsStateArgs>({
+    activeSpreadsheetId: null,
+    selectedSheetId: null,
+    frozenThroughCol: null,
+    columnWidthsPx: [],
+    colCount: 0,
+    worksheetZoom: 1,
+  });
   /** Bumped after reading localStorage so persist effects run with restored URL/range, not initial "". */
   const [browserPrefsReady, setBrowserPrefsReady] = useState(0);
   const dirtyRef = useRef(dirty);
@@ -383,14 +405,23 @@ export function WorkspaceGoogleSheetSection() {
   }, []);
 
   useEffect(() => {
-    if (browserPrefsReady === 0) return;
-    const links = loadLinksWithMigration();
-    setSheetLinks(links);
-    let aid = readActiveLinkId();
-    if (aid && !links.some((l) => l.id === aid)) aid = null;
-    setActiveLinkId(aid);
-    if (aid) {
-      const L = links.find((l) => l.id === aid);
+    const sb = getSupabaseBrowserClient();
+    if (!sb) return;
+    void sb.auth.getSession().then(({ data: { session } }) => {
+      setAuthUser(session?.user ?? null);
+    });
+    const { data } = sb.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  const applyLinksAndActive = useCallback((links: SavedGoogleSheetLink[], aid: string | null) => {
+    let nextAid = aid;
+    if (nextAid && !links.some((l) => l.id === nextAid)) nextAid = null;
+    setActiveLinkId(nextAid);
+    if (nextAid) {
+      const L = links.find((l) => l.id === nextAid);
       if (L) {
         setSpreadsheetInput(L.spreadsheetInput);
         setRange(L.range || DEFAULT_RANGE);
@@ -401,8 +432,42 @@ export function WorkspaceGoogleSheetSection() {
       setRange(DEFAULT_RANGE);
       setImportFormatting(true);
     }
-    setLinksReady(true);
-  }, [browserPrefsReady]);
+  }, []);
+
+  useEffect(() => {
+    if (browserPrefsReady === 0) return;
+    let cancelled = false;
+
+    void (async () => {
+      const sb = getSupabaseBrowserClient();
+      const emptyCollect: CollectSheetsStateArgs = {
+        activeSpreadsheetId: null,
+        selectedSheetId: null,
+        frozenThroughCol: null,
+        columnWidthsPx: [],
+        colCount: 0,
+        worksheetZoom: 1,
+      };
+
+      if (sb) {
+        const { data: sessionData } = await sb.auth.getSession();
+        if (!cancelled && sessionData.session?.user) {
+          const { appliedRemote } = await syncWorkspaceSheetsWithSupabase(sb, emptyCollect);
+          if (!cancelled && appliedRemote) setCloudApplyEpoch((e) => e + 1);
+        }
+      }
+
+      if (cancelled) return;
+      const links = loadLinksWithMigration();
+      setSheetLinks(links);
+      applyLinksAndActive(links, readActiveLinkId());
+      setLinksReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [browserPrefsReady, applyLinksAndActive]);
 
   useEffect(() => {
     if (!linksReady) return;
@@ -487,7 +552,7 @@ export function WorkspaceGoogleSheetSection() {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [spreadsheetId, status?.canQuery, idLooksIncomplete, spreadsheetInput]);
+  }, [spreadsheetId, status?.canQuery, idLooksIncomplete, spreadsheetInput, cloudApplyEpoch]);
 
   const loadFromServer = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -621,6 +686,65 @@ export function WorkspaceGoogleSheetSection() {
   const colCount = values.length ? values[0].length : 0;
   const rowCount = values.length;
 
+  useLayoutEffect(() => {
+    collectArgsRef.current = {
+      activeSpreadsheetId: spreadsheetId,
+      selectedSheetId,
+      frozenThroughCol,
+      columnWidthsPx,
+      colCount,
+      worksheetZoom,
+    };
+  }, [spreadsheetId, selectedSheetId, frozenThroughCol, columnWidthsPx, colCount, worksheetZoom]);
+
+  useEffect(() => {
+    if (!authUser || !linksReady) return;
+    const sb = getSupabaseBrowserClient();
+    if (!sb) return;
+    let cancelled = false;
+    void (async () => {
+      const { appliedRemote } = await syncWorkspaceSheetsWithSupabase(sb, collectArgsRef.current);
+      if (cancelled || !appliedRemote) return;
+      setCloudApplyEpoch((e) => e + 1);
+      const links = loadLinksWithMigration();
+      setSheetLinks(links);
+      applyLinksAndActive(links, readActiveLinkId());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser, linksReady, applyLinksAndActive]);
+
+  useEffect(() => {
+    if (!linksReady || !authUser) return;
+    const sb = getSupabaseBrowserClient();
+    if (!sb) return;
+    bumpLocalSheetsMutation();
+    if (cloudPushTimerRef.current) clearTimeout(cloudPushTimerRef.current);
+    cloudPushTimerRef.current = setTimeout(() => {
+      cloudPushTimerRef.current = null;
+      void (async () => {
+        const state = collectWorkspaceGoogleSheetsState(collectArgsRef.current);
+        const res = await pushWorkspaceGoogleSheetsSettings(sb, state);
+        if (res) markSheetsSyncedFromServer(res.updatedAt);
+      })();
+    }, 2200);
+    return () => {
+      if (cloudPushTimerRef.current) clearTimeout(cloudPushTimerRef.current);
+    };
+  }, [
+    linksReady,
+    authUser,
+    sheetLinks,
+    activeLinkId,
+    spreadsheetId,
+    selectedSheetId,
+    frozenThroughCol,
+    columnWidthsPx,
+    colCount,
+    worksheetZoom,
+  ]);
+
   const showWorksheetGrid = Boolean(
     activeLinkId &&
       status?.canQuery &&
@@ -732,7 +856,7 @@ export function WorkspaceGoogleSheetSection() {
     } catch {
       /* ignore */
     }
-  }, [spreadsheetId]);
+  }, [spreadsheetId, cloudApplyEpoch]);
 
   useEffect(() => {
     if (!spreadsheetId) return;
@@ -825,7 +949,7 @@ export function WorkspaceGoogleSheetSection() {
     } catch {
       /* ignore */
     }
-  }, [spreadsheetId, colCount]);
+  }, [spreadsheetId, colCount, cloudApplyEpoch]);
 
   useEffect(() => {
     if (!spreadsheetId || columnWidthsPx.length === 0 || columnWidthsPx.length !== colCount) return;
@@ -852,7 +976,7 @@ export function WorkspaceGoogleSheetSection() {
     } catch {
       setWorksheetZoom(1);
     }
-  }, [spreadsheetId]);
+  }, [spreadsheetId, cloudApplyEpoch]);
 
   useEffect(() => {
     if (!spreadsheetId) return;
@@ -1270,6 +1394,11 @@ export function WorkspaceGoogleSheetSection() {
 
   return (
     <div className="min-w-0 max-w-full space-y-6">
+      {linksReady && (
+        <div className="space-y-2">
+          <WorkspaceSheetsAccountBar user={authUser} />
+        </div>
+      )}
       {!linksReady ? (
         <div className="flex items-center justify-center gap-3 rounded-2xl border border-pink-100/80 bg-white/90 px-6 py-14 text-sm text-neutral-600 shadow-sm">
           <span

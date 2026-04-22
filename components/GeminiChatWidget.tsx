@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 const STORAGE_KEY = "workspace-gemini-chat-v1";
 const PANEL_SIZE_KEY = "workspace-gemini-chat-panel-size-v1";
@@ -8,7 +8,7 @@ const PANEL_SIZE_KEY = "workspace-gemini-chat-panel-size-v1";
 const PANEL_MIN_W = 280;
 const PANEL_MIN_H = 220;
 const DEFAULT_PANEL_W = 384;
-const DEFAULT_PANEL_H = 448;
+const DEFAULT_PANEL_H = 420;
 
 const STARTER_PROMPTS = [
   "What can I do in this workspace?",
@@ -126,6 +126,59 @@ function persistPanelSize(size: { w: number; h: number }) {
   } catch {
     /* ignore */
   }
+}
+
+/** Inline `**bold**` from model text — no HTML, safe for React children. */
+function parseInlineBold(text: string, keyPrefix: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let rest = text;
+  let i = 0;
+  while (rest.length > 0) {
+    const open = rest.indexOf("**");
+    if (open === -1) {
+      out.push(rest);
+      break;
+    }
+    if (open > 0) {
+      out.push(rest.slice(0, open));
+    }
+    const close = rest.indexOf("**", open + 2);
+    if (close === -1) {
+      out.push(rest.slice(open));
+      break;
+    }
+    const inner = rest.slice(open + 2, close);
+    out.push(
+      <strong key={`${keyPrefix}-b-${i++}`} className="font-semibold text-neutral-900">
+        {inner}
+      </strong>
+    );
+    rest = rest.slice(close + 2);
+  }
+  return out;
+}
+
+function AssistantMessageBody({ content }: { content: string }) {
+  const blocks = useMemo(
+    () =>
+      content
+        .split(/\n\n+/)
+        .map((b) => b.trimEnd())
+        .filter((b) => b.length > 0),
+    [content]
+  );
+  if (blocks.length === 0) {
+    return <p className="text-[13px] text-neutral-500">(Empty reply)</p>;
+  }
+  return (
+    <div className="space-y-1.5 text-[13px] leading-snug text-neutral-800">
+      {blocks.map((block, bi) => (
+        <p key={bi} className="whitespace-pre-wrap break-words">
+          {parseInlineBold(block, `p${bi}`)}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 export function GeminiChatWidget() {
@@ -319,9 +372,9 @@ export function GeminiChatWidget() {
           >
             <ResizeCornerGrip className="h-5 w-5" />
           </button>
-          <div className="flex items-center justify-between gap-3 border-b border-pink-100/80 bg-gradient-to-br from-pink-50/95 via-white to-rose-50/30 py-3.5 pl-11 pr-3">
+          <div className="flex items-center justify-between gap-2 border-b border-pink-100/80 bg-gradient-to-br from-pink-50/95 via-white to-rose-50/30 py-2 pl-11 pr-2">
             <div className="min-w-0 flex-1">
-              <h2 id="gemini-chat-title" className="text-[15px] font-bold tracking-tight text-neutral-900">
+              <h2 id="gemini-chat-title" className="text-sm font-bold tracking-tight text-neutral-900">
                 Workspace AI
               </h2>
             </div>
@@ -338,7 +391,7 @@ export function GeminiChatWidget() {
           </div>
 
           {configured === false && (
-            <p className="border-b border-amber-200/80 bg-amber-50/95 px-4 py-3 text-xs leading-relaxed text-amber-950">
+            <p className="border-b border-amber-200/80 bg-amber-50/95 px-3 py-2 text-[11px] leading-snug text-amber-950">
               Add <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">GEMINI_API_KEY</code>{" "}
               to <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">.env.local</code>, then
               restart <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">npm run dev</code>.
@@ -347,18 +400,18 @@ export function GeminiChatWidget() {
 
           <div
             ref={listRef}
-            className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-gradient-to-b from-neutral-50/90 to-pink-50/20 px-4 py-4"
+            className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-gradient-to-b from-neutral-50/90 to-pink-50/20 px-3 py-2"
           >
             {messages.length === 0 && !error && (
-              <div className="rounded-2xl border border-pink-100/90 bg-white/90 p-4 shadow-sm shadow-pink-100/30">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-pink-500">New conversation</p>
-                <p className="mt-2 text-sm font-medium text-neutral-900">How can I help?</p>
-                <p className="mt-1.5 text-xs leading-relaxed text-neutral-600">
+              <div className="rounded-xl border border-pink-100/90 bg-white/90 p-3 shadow-sm shadow-pink-100/30">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-pink-500">New conversation</p>
+                <p className="mt-1 text-sm font-medium text-neutral-900">How can I help?</p>
+                <p className="mt-1 text-[11px] leading-snug text-neutral-600">
                   Ask about this workspace, studying, or anything else. Chats stay in this browser tab only (not saved
                   to the server).
                 </p>
-                <div className="mt-4 flex flex-col gap-2">
-                  <p className="text-[11px] font-medium text-neutral-500">Try</p>
+                <div className="mt-2.5 flex flex-col gap-1.5">
+                  <p className="text-[10px] font-medium text-neutral-500">Try</p>
                   {STARTER_PROMPTS.map((text) => (
                     <button
                       key={text}
@@ -368,7 +421,7 @@ export function GeminiChatWidget() {
                         setInput(text);
                         requestAnimationFrame(() => textareaRef.current?.focus());
                       }}
-                      className="rounded-xl border border-pink-100/90 bg-pink-50/40 px-3 py-2.5 text-left text-xs font-medium leading-snug text-pink-950 transition hover:border-pink-200 hover:bg-pink-50/90 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-pink-100/90 bg-pink-50/40 px-2.5 py-1.5 text-left text-[11px] font-medium leading-snug text-pink-950 transition hover:border-pink-200 hover:bg-pink-50/90 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {text}
                     </button>
@@ -379,29 +432,37 @@ export function GeminiChatWidget() {
             {messages.map((m) => (
               <div
                 key={m.id}
-                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+                className={`flex min-w-0 ${m.role === "user" ? "justify-end" : "w-full justify-start"}`}
               >
                 <div
-                  className={`flex max-w-[min(92%,20rem)] flex-col gap-1 ${m.role === "user" ? "items-end" : "items-start"}`}
+                  className={`flex min-w-0 flex-col gap-0.5 ${
+                    m.role === "user"
+                      ? "max-w-[min(90%,16rem)] shrink-0 items-end"
+                      : "w-full max-w-full items-stretch"
+                  }`}
                 >
-                  <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+                  <span className="px-0.5 text-[9px] font-semibold uppercase leading-none tracking-wide text-neutral-400">
                     {m.role === "user" ? "You" : "Assistant"}
                   </span>
                   <div
-                    className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-sm ${
+                    className={
                       m.role === "user"
-                        ? "bg-gradient-to-br from-pink-600 to-rose-600 text-white shadow-pink-300/25"
-                        : "border border-pink-100/90 bg-white text-neutral-800 shadow-neutral-900/5"
-                    }`}
+                        ? "w-fit max-w-full rounded-xl bg-gradient-to-br from-pink-600 to-rose-600 px-3 py-2 text-[13px] leading-snug text-white shadow-sm shadow-pink-300/25"
+                        : "w-full min-w-0 rounded-xl border border-pink-100/90 bg-white px-3 py-2 text-neutral-800 shadow-sm shadow-neutral-900/5"
+                    }
                   >
-                    <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                    {m.role === "user" ? (
+                      <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                    ) : (
+                      <AssistantMessageBody content={m.content} />
+                    )}
                   </div>
                 </div>
               </div>
             ))}
             {loading && (
-              <div className="flex justify-start">
-                <div className="inline-flex items-center gap-2 rounded-2xl border border-pink-100/90 bg-white px-3.5 py-2.5 text-xs font-medium text-pink-800 shadow-sm">
+              <div className="flex w-full min-w-0 justify-start">
+                <div className="inline-flex items-center gap-1.5 rounded-xl border border-pink-100/90 bg-white px-2.5 py-1.5 text-[11px] font-medium text-pink-800 shadow-sm">
                   <span
                     className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-pink-200 border-t-pink-600"
                     aria-hidden
@@ -412,7 +473,7 @@ export function GeminiChatWidget() {
             )}
             {error && (
               <p
-                className="rounded-xl border border-red-200/90 bg-red-50/95 px-3.5 py-2.5 text-xs font-medium leading-snug text-red-900"
+                className="rounded-lg border border-red-200/90 bg-red-50/95 px-2.5 py-1.5 text-[11px] font-medium leading-snug text-red-900"
                 role="alert"
               >
                 {error}
@@ -421,13 +482,13 @@ export function GeminiChatWidget() {
           </div>
 
           <form
-            className="border-t border-pink-100/80 bg-white px-4 pb-3 pt-3"
+            className="border-t border-pink-100/80 bg-white px-3 pb-2 pt-2"
             onSubmit={(e) => {
               e.preventDefault();
               void send();
             }}
           >
-            <div className="flex items-end gap-2">
+            <div className="flex items-end gap-1.5">
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -441,19 +502,19 @@ export function GeminiChatWidget() {
                 placeholder="Write a message…"
                 rows={2}
                 disabled={loading || configured === false}
-                className="max-h-32 min-h-[2.75rem] flex-1 resize-y rounded-xl border border-neutral-200/90 bg-neutral-50/50 px-3.5 py-2.5 text-sm leading-snug text-neutral-900 placeholder:text-neutral-400 outline-none transition-colors focus:border-pink-300 focus:bg-white focus:ring-2 focus:ring-pink-200/60 disabled:opacity-50"
+                className="max-h-28 min-h-[2.25rem] flex-1 resize-y rounded-lg border border-neutral-200/90 bg-neutral-50/50 px-2.5 py-2 text-[13px] leading-snug text-neutral-900 placeholder:text-neutral-400 outline-none transition-colors focus:border-pink-300 focus:bg-white focus:ring-2 focus:ring-pink-200/60 disabled:opacity-50"
                 aria-label="Message"
               />
               <button
                 type="submit"
                 disabled={loading || !input.trim() || configured === false}
-                className="h-10 shrink-0 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 px-4 text-xs font-bold text-white shadow-md shadow-pink-200/35 transition hover:from-pink-700 hover:to-rose-700 disabled:cursor-not-allowed disabled:opacity-45"
+                className="h-9 shrink-0 rounded-lg bg-gradient-to-r from-pink-600 to-rose-600 px-3 text-[11px] font-bold text-white shadow-md shadow-pink-200/35 transition hover:from-pink-700 hover:to-rose-700 disabled:cursor-not-allowed disabled:opacity-45"
               >
                 Send
               </button>
             </div>
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-              <p className="text-[11px] text-neutral-400">
+            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+              <p className="text-[10px] text-neutral-400">
                 <span className="text-neutral-500">Enter</span> to send ·{" "}
                 <span className="text-neutral-500">Shift+Enter</span> for a new line
               </p>

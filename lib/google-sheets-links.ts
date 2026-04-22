@@ -24,7 +24,7 @@ function defaultLabelForInput(input: string): string {
   return "Linked sheet";
 }
 
-function normalizeLink(raw: unknown): SavedGoogleSheetLink | null {
+export function normalizeLink(raw: unknown): SavedGoogleSheetLink | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   const id = typeof o.id === "string" && o.id.trim() ? o.id.trim() : null;
