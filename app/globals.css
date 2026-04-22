@@ -224,7 +224,37 @@ body {
   animation: pin-gate-shake 0.45s ease-in-out;
 }
 
+/* Countdown timer: soft ↔ rose red alternation after time's up */
+@keyframes workspace-timer-finished-pulse {
+  0%,
+  100% {
+    color: #fda4af;
+    opacity: 1;
+  }
+  50% {
+    color: #e11d48;
+    opacity: 1;
+  }
+}
+
+.workspace-timer-finished-digit {
+  animation: workspace-timer-finished-pulse 2.2s ease-in-out infinite;
+}
+
+.workspace-timer-finished-solid {
+  color: #e11d48;
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .workspace-timer-finished-digit {
+    animation: none;
+    color: #e11d48;
+    opacity: 1;
+  }
+  .workspace-timer-finished-solid {
+    color: #e11d48;
+  }
   .pin-gate-shake {
     animation: none;
   }

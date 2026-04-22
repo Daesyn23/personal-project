@@ -12,6 +12,7 @@ import { RenameCollectionModal } from "@/components/RenameCollectionModal";
 import { ReorderCardsModal } from "@/components/ReorderCardsModal";
 import { WorkspaceDocumentsSection } from "@/components/WorkspaceDocumentsSection";
 import { WorkspaceGoogleSheetSection } from "@/components/WorkspaceGoogleSheetSection";
+import { WorkspaceTimerSection } from "@/components/WorkspaceTimerSection";
 import {
   deleteFlashcards,
   listCardSets,
@@ -32,7 +33,7 @@ function tileLabel(card: FlashcardRow): string {
   );
 }
 
-type WorkspaceArea = "documents" | "flashcards" | "googleSheet";
+type WorkspaceArea = "documents" | "flashcards" | "googleSheet" | "timer";
 
 export default function HomePage() {
   const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>("flashcards");
@@ -70,7 +71,9 @@ export default function HomePage() {
   }, [refresh]);
 
   useEffect(() => {
-    if (workspaceArea === "documents" || workspaceArea === "googleSheet") setPresentOpen(false);
+    if (workspaceArea === "documents" || workspaceArea === "googleSheet" || workspaceArea === "timer") {
+      setPresentOpen(false);
+    }
   }, [workspaceArea]);
 
   useLayoutEffect(() => {
@@ -264,6 +267,17 @@ export default function HomePage() {
             >
               Google Sheet
             </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceArea("timer")}
+              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+                workspaceArea === "timer"
+                  ? "border-pink-600 text-pink-700"
+                  : "border-transparent text-neutral-500 hover:text-pink-600"
+              }`}
+            >
+              Timer
+            </button>
           </nav>
         </header>
 
@@ -271,6 +285,8 @@ export default function HomePage() {
           <WorkspaceDocumentsSection />
         ) : workspaceArea === "googleSheet" ? (
           <WorkspaceGoogleSheetSection />
+        ) : workspaceArea === "timer" ? (
+          <WorkspaceTimerSection />
         ) : (
           <>
         {activeSetId && (
