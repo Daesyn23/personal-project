@@ -7,16 +7,25 @@ import type {
 } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { SavedGoogleSheetCard } from "@/components/SavedGoogleSheetCard";
 import { emptyCellPayload, type SheetCellPayload } from "@/lib/google-sheets-grid-parse";
+import {
+  DEFAULT_SHEETS_CELL_RANGE,
+  defaultLabelForInput,
+  loadLinksWithMigration,
+  newSheetLinkId,
+  readActiveLinkId,
+  type SavedGoogleSheetLink,
+  writeActiveLinkId,
+  writeSavedSheetLinks,
+} from "@/lib/google-sheets-links";
 import { parseSheetGidFromUrl, parseSpreadsheetId } from "@/lib/parse-spreadsheet-url";
 import { sheetCellStyleToCss } from "@/lib/sheet-cell-style-react";
 import type { SheetMergeCell } from "@/lib/sheet-merge-localize";
 import { normalizeSheetsA1Range, spreadsheetIdLooksIncomplete } from "@/lib/sheets-a1";
 
-const LS_ID = "workspace_google_sheets_spreadsheet_id";
-const LS_RANGE = "workspace_google_sheets_range";
 /** Cell-only range; sheet tab comes from the dropdown (or explicit 'Name'! in the field). */
-const DEFAULT_RANGE = "A1:AA200";
+const DEFAULT_RANGE = DEFAULT_SHEETS_CELL_RANGE;
 
 function sheetIdStorageKey(spreadsheetId: string): string {
   return `workspace_google_sheets_sheet_${spreadsheetId}`;
@@ -37,10 +46,6 @@ function worksheetZoomStorageKey(spreadsheetId: string): string {
 const MIN_COL_WIDTH_PX = 40;
 const MAX_COL_WIDTH_PX = 560;
 
-/** Whole Linked Google Sheet settings header: collapsed or expanded (localStorage so it survives reload after save). */
-const LS_LINKED_SECTION_COLLAPSED = "workspace_google_sheets_linked_section_collapsed";
-/** Legacy session-only key from older builds — read once to migrate. */
-const LS_LINKED_SECTION_LEGACY_SESSION = "workspace_google_sheets_editor_collapsed";
 const POLL_MS = 25_000;
 const MAX_ROWS = 400;
 /** Through column AZ (52 cols); wide grade sheets often need AA–AD. */
@@ -285,7 +290,6 @@ export function WorkspaceGoogleSheetSection() {
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
   const [lastSaveAt, setLastSaveAt] = useState<Date | null>(null);
   const [saveFlash, setSaveFlash] = useState(false);
-  const [linkedSectionCollapsed, setLinkedSectionCollapsed] = useState(false);
   const [subtleSync, setSubtleSync] = useState(false);
 
   const [sheetTabs, setSheetTabs] = useState<{ sheetId: number; title: string; index: number }[]>([]);
@@ -306,6 +310,27 @@ export function WorkspaceGoogleSheetSection() {
   const [measureTick, setMeasureTick] = useState(0);
   /** View zoom for the worksheet grid only (1 = 100%). Persisted per spreadsheet. */
   const [worksheetZoom, setWorksheetZoom] = useState(1);
+
+  const [sheetLinks, setSheetLinks] = useState<SavedGoogleSheetLink[]>([]);
+  const [activeLinkId, setActiveLinkId] = useState<string | null>(null);
+  const [linksReady, setLinksReady] = useState(false);
+  const [newLinkOpen, setNewLinkOpen] = useState(false);
+  const [newLinkLabel, setNewLinkLabel] = useState("");
+  const [newLinkUrl, setNewLinkUrl] = useState("");
+  const [newLinkRange, setNewLinkRange] = useState(DEFAULT_RANGE);
+  const [newLinkBusy, setNewLinkBusy] = useState(false);
+  const [newLinkError, setNewLinkError] = useState<string | null>(null);
+  const [renamingLink, setRenamingLink] = useState<SavedGoogleSheetLink | null>(null);
+  const [renameLabelDraft, setRenameLabelDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  const [linkConnectionModalId, setLinkConnectionModalId] = useState<string | null>(null);
+  const [linkConnectionDraft, setLinkConnectionDraft] = useState({
+    spreadsheetInput: "",
+    range: DEFAULT_RANGE,
+    importFormatting: true,
+  });
+  const [linkConnectionError, setLinkConnectionError] = useState<string | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** Bumped after reading localStorage so persist effects run with restored URL/range, not initial "". */
@@ -346,32 +371,12 @@ export function WorkspaceGoogleSheetSection() {
     return n.includes("!") ? (n.split("!")[1] ?? n) : n;
   }, [range]);
 
+  const activeLink = useMemo(
+    () => sheetLinks.find((l) => l.id === activeLinkId) ?? null,
+    [sheetLinks, activeLinkId]
+  );
+
   useEffect(() => {
-    try {
-      const id = localStorage.getItem(LS_ID) ?? "";
-      const r = localStorage.getItem(LS_RANGE) ?? DEFAULT_RANGE;
-      setSpreadsheetInput(id);
-      setRange(r || DEFAULT_RANGE);
-      let collapsed = localStorage.getItem(LS_LINKED_SECTION_COLLAPSED);
-      if (collapsed == null) {
-        const fromSession = sessionStorage.getItem(LS_LINKED_SECTION_COLLAPSED);
-        if (fromSession === "1") {
-          collapsed = "1";
-          try {
-            localStorage.setItem(LS_LINKED_SECTION_COLLAPSED, "1");
-            sessionStorage.removeItem(LS_LINKED_SECTION_COLLAPSED);
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-      const legacySession = sessionStorage.getItem(LS_LINKED_SECTION_LEGACY_SESSION);
-      if (collapsed === "1" || legacySession === "1") {
-        setLinkedSectionCollapsed(true);
-      }
-    } catch {
-      /* ignore */
-    }
     queueMicrotask(() => {
       setBrowserPrefsReady(1);
     });
@@ -379,23 +384,35 @@ export function WorkspaceGoogleSheetSection() {
 
   useEffect(() => {
     if (browserPrefsReady === 0) return;
-    try {
-      localStorage.setItem(LS_LINKED_SECTION_COLLAPSED, linkedSectionCollapsed ? "1" : "0");
-    } catch {
-      /* ignore */
+    const links = loadLinksWithMigration();
+    setSheetLinks(links);
+    let aid = readActiveLinkId();
+    if (aid && !links.some((l) => l.id === aid)) aid = null;
+    setActiveLinkId(aid);
+    if (aid) {
+      const L = links.find((l) => l.id === aid);
+      if (L) {
+        setSpreadsheetInput(L.spreadsheetInput);
+        setRange(L.range || DEFAULT_RANGE);
+        setImportFormatting(L.importFormatting ?? true);
+      }
+    } else {
+      setSpreadsheetInput("");
+      setRange(DEFAULT_RANGE);
+      setImportFormatting(true);
     }
-  }, [linkedSectionCollapsed, browserPrefsReady]);
+    setLinksReady(true);
+  }, [browserPrefsReady]);
 
   useEffect(() => {
-    if (browserPrefsReady === 0) return;
-    try {
-      if (spreadsheetInput.trim()) localStorage.setItem(LS_ID, spreadsheetInput.trim());
-      else localStorage.removeItem(LS_ID);
-      if (range.trim()) localStorage.setItem(LS_RANGE, range.trim());
-    } catch {
-      /* ignore */
-    }
-  }, [spreadsheetInput, range, browserPrefsReady]);
+    if (!linksReady) return;
+    writeSavedSheetLinks(sheetLinks);
+  }, [sheetLinks, linksReady]);
+
+  useEffect(() => {
+    if (!linksReady) return;
+    writeActiveLinkId(activeLinkId);
+  }, [activeLinkId, linksReady]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -605,7 +622,8 @@ export function WorkspaceGoogleSheetSection() {
   const rowCount = values.length;
 
   const showWorksheetGrid = Boolean(
-    status?.canQuery &&
+    activeLinkId &&
+      status?.canQuery &&
       spreadsheetId &&
       !idLooksIncomplete &&
       (!needsTabForCells || effectiveSheetGid != null) &&
@@ -656,6 +674,18 @@ export function WorkspaceGoogleSheetSection() {
       document.removeEventListener("keydown", onEsc, true);
     };
   }, [freezeColumnMenu]);
+
+  useEffect(() => {
+    if (!linkConnectionModalId) return;
+    const onEsc = (ev: globalThis.KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        setLinkConnectionModalId(null);
+        setLinkConnectionError(null);
+      }
+    };
+    document.addEventListener("keydown", onEsc, true);
+    return () => document.removeEventListener("keydown", onEsc, true);
+  }, [linkConnectionModalId]);
 
   const freezeMenuLayout = useMemo(() => {
     if (!freezeColumnMenu || typeof window === "undefined") return null;
@@ -989,7 +1019,6 @@ export function WorkspaceGoogleSheetSection() {
       setDirty(false);
       setLastSynced(new Date());
       setLastSaveAt(new Date());
-      setLinkedSectionCollapsed(true);
       setSaveFlash(true);
       window.setTimeout(() => setSaveFlash(false), 2800);
     } catch (e) {
@@ -1008,6 +1037,225 @@ export function WorkspaceGoogleSheetSection() {
     void loadFromServer({ silent: false });
   };
 
+  const flushActiveLinkToStore = useCallback(() => {
+    if (!activeLinkId) return;
+    setSheetLinks((prev) =>
+      prev.map((l) =>
+        l.id === activeLinkId
+          ? {
+              ...l,
+              spreadsheetInput: spreadsheetInput.trim(),
+              range: normalizeSheetsA1Range(range.trim() || DEFAULT_RANGE),
+              importFormatting,
+            }
+          : l
+      )
+    );
+  }, [activeLinkId, spreadsheetInput, range, importFormatting]);
+
+  const goToAllSheets = useCallback(() => {
+    if (dirty) {
+      if (
+        !window.confirm(
+          "You have unsaved edits. Discard them and go back to all linked sheets?"
+        )
+      ) {
+        return;
+      }
+    }
+    flushActiveLinkToStore();
+    setActiveLinkId(null);
+    setSpreadsheetInput("");
+    setRange(DEFAULT_RANGE);
+    setDirty(false);
+    setError(null);
+    setFormatWarning(null);
+    setSelectedCell(null);
+    setFreezeColumnMenu(null);
+    setValues([]);
+    setCellMeta([]);
+    setSheetMerges([]);
+    setLastSynced(null);
+    setImportFormatting(true);
+  }, [dirty, flushActiveLinkToStore]);
+
+  const openLinkConnectionModal = useCallback(
+    (id: string) => {
+      const L = sheetLinks.find((l) => l.id === id);
+      if (!L) return;
+      const useLive = id === activeLinkId;
+      setLinkConnectionDraft({
+        spreadsheetInput: useLive ? spreadsheetInput : L.spreadsheetInput,
+        range: useLive ? range : L.range || DEFAULT_RANGE,
+        importFormatting: useLive ? importFormatting : (L.importFormatting ?? true),
+      });
+      setLinkConnectionError(null);
+      setLinkConnectionModalId(id);
+    },
+    [sheetLinks, activeLinkId, spreadsheetInput, range, importFormatting]
+  );
+
+  const saveLinkConnectionModal = useCallback(() => {
+    if (!linkConnectionModalId) return;
+    const trimmed = linkConnectionDraft.spreadsheetInput.trim();
+    const sid = parseSpreadsheetId(trimmed);
+    if (!sid) {
+      setLinkConnectionError("Paste a valid Google Sheets URL or spreadsheet ID.");
+      return;
+    }
+    if (spreadsheetIdLooksIncomplete(sid)) {
+      setLinkConnectionError(
+        "That spreadsheet ID looks incomplete. Copy the full URL from the address bar."
+      );
+      return;
+    }
+    const rangeNorm = normalizeSheetsA1Range(
+      linkConnectionDraft.range.trim() || DEFAULT_RANGE
+    );
+    const imp = linkConnectionDraft.importFormatting;
+    setSheetLinks((prev) =>
+      prev.map((l) =>
+        l.id === linkConnectionModalId
+          ? {
+              ...l,
+              spreadsheetInput: trimmed,
+              range: rangeNorm,
+              importFormatting: imp,
+            }
+          : l
+      )
+    );
+    if (activeLinkId === linkConnectionModalId) {
+      setSpreadsheetInput(trimmed);
+      setRange(rangeNorm);
+      setImportFormatting(imp);
+    }
+    setLinkConnectionModalId(null);
+    setLinkConnectionError(null);
+  }, [
+    linkConnectionModalId,
+    linkConnectionDraft,
+    activeLinkId,
+  ]);
+
+  const openSheetLink = useCallback(
+    (id: string) => {
+      if (id === activeLinkId) return;
+      if (dirty) {
+        if (
+          !window.confirm(
+            "You have unsaved edits. Discard them and open the other sheet?"
+          )
+        ) {
+          return;
+        }
+      }
+      flushActiveLinkToStore();
+      const L = sheetLinks.find((x) => x.id === id);
+      if (!L) return;
+      setActiveLinkId(id);
+      setSpreadsheetInput(L.spreadsheetInput);
+      setRange(L.range || DEFAULT_RANGE);
+      setImportFormatting(L.importFormatting ?? true);
+      setDirty(false);
+      setError(null);
+      setFormatWarning(null);
+      setSelectedCell(null);
+      setFreezeColumnMenu(null);
+    },
+    [activeLinkId, dirty, sheetLinks, flushActiveLinkToStore, spreadsheetInput, range, importFormatting]
+  );
+
+  const removeSheetLink = useCallback(
+    (id: string) => {
+      if (!window.confirm("Remove this saved sheet from your workspace?")) return;
+      const isActive = activeLinkId === id;
+      if (isActive && dirty) {
+        if (
+          !window.confirm(
+            "This link is open and has unsaved edits. Discard them and remove it?"
+          )
+        ) {
+          return;
+        }
+      }
+      if (isActive) flushActiveLinkToStore();
+      setSheetLinks((prev) => prev.filter((l) => l.id !== id));
+      if (isActive) {
+        setActiveLinkId(null);
+        setSpreadsheetInput("");
+        setRange(DEFAULT_RANGE);
+        setDirty(false);
+        setError(null);
+        setFormatWarning(null);
+        setSelectedCell(null);
+        setFreezeColumnMenu(null);
+        setValues([]);
+        setCellMeta([]);
+        setSheetMerges([]);
+        setLastSynced(null);
+        setImportFormatting(true);
+      }
+    },
+    [activeLinkId, dirty, flushActiveLinkToStore, spreadsheetInput, range, importFormatting]
+  );
+
+  const submitNewSheetLink = useCallback(() => {
+    const trimmedUrl = newLinkUrl.trim();
+    const sid = parseSpreadsheetId(trimmedUrl);
+    if (!sid) {
+      setNewLinkError("Paste a valid Google Sheets URL or spreadsheet ID.");
+      return;
+    }
+    if (spreadsheetIdLooksIncomplete(sid)) {
+      setNewLinkError("That spreadsheet ID looks incomplete. Copy the full URL from the address bar.");
+      return;
+    }
+    setNewLinkBusy(true);
+    setNewLinkError(null);
+    try {
+      const label =
+        newLinkLabel.trim() || defaultLabelForInput(trimmedUrl);
+      const rangeNorm = normalizeSheetsA1Range(
+        newLinkRange.trim() || DEFAULT_RANGE
+      );
+      const entry: SavedGoogleSheetLink = {
+        id: newSheetLinkId(),
+        label,
+        spreadsheetInput: trimmedUrl,
+        range: rangeNorm,
+        importFormatting: true,
+      };
+      setSheetLinks((prev) => {
+        const flushed = prev.map((l) =>
+          activeLinkId && l.id === activeLinkId
+            ? {
+                ...l,
+                spreadsheetInput: spreadsheetInput.trim(),
+                range: normalizeSheetsA1Range(range.trim() || DEFAULT_RANGE),
+                importFormatting,
+              }
+            : l
+        );
+        return [...flushed, entry];
+      });
+      setActiveLinkId(entry.id);
+      setSpreadsheetInput(entry.spreadsheetInput);
+      setRange(entry.range);
+      setImportFormatting(true);
+      setDirty(false);
+      setError(null);
+      setFormatWarning(null);
+      setSelectedCell(null);
+      setNewLinkOpen(false);
+      setNewLinkLabel("");
+      setNewLinkUrl("");
+      setNewLinkRange(DEFAULT_RANGE);
+    } finally {
+      setNewLinkBusy(false);
+    }
+  }, [newLinkUrl, newLinkLabel, newLinkRange, activeLinkId, spreadsheetInput, range, importFormatting]);
+
   const openGid = selectedSheetId ?? sheetGid;
   const sheetUrl = spreadsheetId
     ? openGid != null
@@ -1022,285 +1270,168 @@ export function WorkspaceGoogleSheetSection() {
 
   return (
     <div className="min-w-0 max-w-full space-y-6">
-      <div
-        className={`relative overflow-hidden rounded-2xl border border-pink-200/60 bg-white/95 shadow-lg shadow-pink-200/25 ring-1 ring-pink-100/50 transition-shadow ${saveFlash ? "shadow-emerald-100/30 ring-2 ring-emerald-400/70" : ""}`}
-      >
-        <div
-          className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-rose-400 via-pink-500 to-fuchsia-400 opacity-90"
-          aria-hidden
-        />
-
-        <div className="border-b border-pink-100/80 bg-gradient-to-br from-rose-50/80 via-white to-pink-50/40 px-5 pb-4 pt-6 sm:px-7 sm:pt-7">
-          <button
-            type="button"
-            onClick={() => setLinkedSectionCollapsed((c) => !c)}
-            className="flex w-full min-w-0 items-start gap-3 rounded-xl p-1 text-left transition hover:bg-white/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-300"
-            aria-expanded={!linkedSectionCollapsed}
-          >
-            <span
-              className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-pink-200/80 bg-white text-pink-600 shadow-sm transition-transform duration-200 ${linkedSectionCollapsed ? "" : "rotate-90"}`}
-              aria-hidden
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-pink-600/90">Google Sheets</span>
-              <h2 className="mt-0.5 bg-gradient-to-r from-pink-700 via-rose-600 to-pink-600 bg-clip-text text-xl font-bold tracking-tight text-transparent sm:text-2xl">
-                Linked Google Sheet
-              </h2>
-              {linkedSectionCollapsed ? (
-                <p className="mt-2 text-sm leading-snug text-neutral-600">
-                  {spreadsheetId ? (
-                    <>
-                      <span className="font-medium text-neutral-800">{activeSheetTitle ?? "Sheet"}</span>
-                      <span className="text-neutral-400"> · </span>
-                      <span className="font-mono text-xs text-pink-900">{rangeCellsOnly}</span>
-                      {values.length > 0 && (
-                        <>
-                          <span className="text-neutral-400"> · </span>
-                          {rowCount}×{colCount}
-                        </>
-                      )}
-                      {dirty && <span className="font-semibold text-amber-700"> · Unsaved edits</span>}
-                      {lastSaveAt && (
-                        <span className="text-emerald-700">
-                          {" "}
-                          · Saved {lastSaveAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                      )}
-                      <span className="mt-1 block text-xs text-neutral-500">
-                        Click to expand Google Sheet connection settings.
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-neutral-500">Paste a spreadsheet link — click to expand.</span>
-                  )}
-                </p>
-              ) : (
-                <p className="mt-2 max-w-3xl text-sm leading-relaxed text-neutral-600">
-                  Paste your link, pick a tab, and edit in the workspace. Changes sync to Google when you save.
-                  Auto-refresh every {POLL_MS / 1000}s when there are no unsaved edits.
-                </p>
-              )}
-            </span>
-          </button>
-        </div>
-
-        <div
-          className={`grid min-w-0 transition-[grid-template-rows] duration-300 ease-out ${linkedSectionCollapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"}`}
-        >
-          <div className="min-h-0 overflow-hidden">
-            <div className="min-w-0 space-y-5 px-5 pb-7 pt-5 sm:px-7">
-        {status && !status.oauthClientConfigured && (
-          <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
-            Add <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_ID</code> and{" "}
-            <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_SECRET</code> to{" "}
-            <code className="rounded bg-amber-100 px-1">.env.local</code>, then open{" "}
-            <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
-              Connect Google
-            </a>{" "}
-            and paste <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> from the result page.
-          </p>
-        )}
-
-        {status?.oauthClientConfigured && !status.refreshTokenSet && (
-          <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
-            Open{" "}
-            <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
-              Connect Google
-            </a>{" "}
-            in this browser, approve access, then add <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code>{" "}
-            to <code className="rounded bg-amber-100 px-1">.env.local</code> and restart the dev server.
-          </p>
-        )}
-
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <label className="block text-sm font-medium text-neutral-800">
-            Spreadsheet URL or ID
-            <input
-              type="text"
-              value={spreadsheetInput}
-              onChange={(e) => setSpreadsheetInput(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/…"
-              spellCheck={false}
-              className="mt-1.5 w-full rounded-xl border border-pink-100 bg-white px-3 py-2.5 font-mono text-xs text-neutral-900 shadow-inner outline-none ring-pink-200 focus:border-pink-300 focus:ring-2 focus:ring-pink-200 sm:text-sm"
-            />
-            <span className="mt-1 block text-xs font-normal text-neutral-500">
-              Saved automatically in this browser (localStorage) when you change the link or clear it.
-            </span>
-            {idLooksIncomplete && (
-              <span className="mt-1 block text-xs font-medium text-amber-800">
-                This ID looks cut off. Copy the full URL from the address bar (the part after{" "}
-                <code className="rounded bg-amber-100 px-1">/d/</code> is usually ~44 characters).
-              </span>
-            )}
-          </label>
-          <label className="block text-sm font-medium text-neutral-800">
-            Range (A1 notation)
-            <input
-              type="text"
-              value={range}
-              onChange={(e) => setRange(e.target.value)}
-              onBlur={() => setRange((r) => normalizeSheetsA1Range(r))}
-              placeholder={DEFAULT_RANGE}
-              spellCheck={false}
-              className="mt-1.5 w-full rounded-xl border border-pink-100 bg-white px-3 py-2.5 font-mono text-sm text-neutral-900 shadow-inner outline-none ring-pink-200 focus:border-pink-300 focus:ring-2 focus:ring-pink-200"
-            />
-            <span className="mt-1 block text-xs font-normal text-neutral-500">
-              For ranges like <code className="rounded bg-pink-50 px-1">A1:AA200</code>, pick the sheet in the dropdown
-              below. Or include the tab in the range, e.g.{" "}
-              <code className="rounded bg-pink-50 px-1 text-[11px]">{"'Quiz new'!A1:AA200"}</code>.
-            </span>
-          </label>
-        </div>
-
-        <div className="mt-4">
-          <label className="block text-sm font-medium text-neutral-800">
-            Sheet tab
-            <select
-              value={selectedSheetId == null ? "" : String(selectedSheetId)}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "") {
-                  setSelectedSheetId(null);
-                  return;
-                }
-                const n = parseInt(v, 10);
-                if (!Number.isFinite(n)) return;
-                setSelectedSheetId(n);
-                try {
-                  if (spreadsheetId) {
-                    localStorage.setItem(sheetIdStorageKey(spreadsheetId), String(n));
-                  }
-                } catch {
-                  /* ignore */
-                }
-              }}
-              disabled={!spreadsheetId || tabsLoading || sheetTabs.length === 0}
-              className="mt-1.5 w-full max-w-xl rounded-xl border border-pink-100 bg-white px-3 py-2.5 text-sm font-medium text-neutral-900 shadow-inner outline-none ring-pink-200 focus:border-pink-300 focus:ring-2 focus:ring-pink-200 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="">
-                {tabsLoading ? "Loading tabs…" : "Choose a sheet tab…"}
-              </option>
-              {sheetTabs.map((t) => (
-                <option key={t.sheetId} value={String(t.sheetId)}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
-            <span className="mt-1 block text-xs font-normal text-neutral-500">
-              Required when the range is only cells (no tab name). Your choice is saved for this spreadsheet.
-            </span>
-            {tabsError && (
-              <p className="mt-2 text-xs font-medium text-red-600" role="alert">
-                {tabsError}
-              </p>
-            )}
-          </label>
-        </div>
-
-        <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-neutral-700">
-          <input
-            type="checkbox"
-            checked={importFormatting}
-            onChange={(e) => setImportFormatting(e.target.checked)}
-            className="h-4 w-4 rounded border-pink-300 text-pink-600 focus:ring-pink-500"
+      {!linksReady ? (
+        <div className="flex items-center justify-center gap-3 rounded-2xl border border-pink-100/80 bg-white/90 px-6 py-14 text-sm text-neutral-600 shadow-sm">
+          <span
+            className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-pink-200 border-t-pink-600"
+            aria-hidden
           />
-          <span>
-            Import cell formatting (background, text style, alignment). Includes{" "}
-            <strong className="font-semibold text-neutral-800">conditional formatting</strong> as rendered in Google
-            Sheets. Slightly larger API response.
-          </span>
-        </label>
-
-        <div className="mt-5 flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            disabled={
-              !status?.canQuery ||
-              !spreadsheetId ||
-              loading ||
-              tabsLoading ||
-              (needsTabForCells && effectiveSheetGid == null)
-            }
-            onClick={() => void loadFromServer({ silent: false })}
-            className={btnGhost}
-          >
-            {loading ? "Loading…" : "Refresh"}
-          </button>
-          <button
-            type="button"
-            disabled={
-              !status?.canQuery ||
-              !spreadsheetId ||
-              saving ||
-              values.length === 0 ||
-              (needsTabForCells && effectiveSheetGid == null)
-            }
-            onClick={() => void saveToGoogle()}
-            className="rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 px-5 py-2.5 text-sm font-bold text-white shadow-md shadow-pink-300/40 transition hover:from-pink-700 hover:to-rose-700 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:from-pink-600 disabled:hover:to-rose-600"
-          >
-            {saving ? "Saving…" : "Save to Google Sheet"}
-          </button>
-          {sheetUrl && (
-            <a
-              href={sheetUrl}
-              target="_blank"
-              rel="noreferrer"
-              className={`${btnNeutral} inline-flex items-center gap-1.5 px-4 py-2.5 text-sm`}
-            >
-              Open in Sheets
-            </a>
-          )}
-          <a
-            href="/api/google-sheets/auth"
-            className={`${btnNeutral} inline-flex px-4 py-2.5 text-sm font-medium text-neutral-600`}
-          >
-            Connect Google
-          </a>
+          Loading saved sheets…
         </div>
+      ) : activeLinkId == null ? (
+        <div className="space-y-6">
+          {status && !status.oauthClientConfigured && (
+            <p className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
+              Add <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_ID</code> and{" "}
+              <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_SECRET</code> to{" "}
+              <code className="rounded bg-amber-100 px-1">.env.local</code>, then open{" "}
+              <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
+                Connect Google
+              </a>{" "}
+              and paste <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> from the result page.
+            </p>
+          )}
 
-        {error && (
-          <p className="mt-3 text-sm font-medium text-red-600" role="alert">
-            {error}
-          </p>
-        )}
-        {formatWarning && !error && (
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-sm text-amber-950" role="status">
-            Showing values only (formatting could not be loaded). {formatWarning}
-          </p>
-        )}
+          {status?.oauthClientConfigured && !status.refreshTokenSet && (
+            <p className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
+              Open{" "}
+              <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
+                Connect Google
+              </a>{" "}
+              in this browser, approve access, then add{" "}
+              <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> to{" "}
+              <code className="rounded bg-amber-100 px-1">.env.local</code> and restart the dev server.
+            </p>
+          )}
 
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-neutral-500">
-          {loading && spreadsheetId && (
-            <span className="inline-flex items-center gap-1.5 font-semibold text-pink-800">
-              <span
-                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-pink-200 border-t-pink-600"
-                aria-hidden
-              />
-              Loading sheet…
-            </span>
-          )}
-          {lastSynced && (
-            <span>
-              Last synced: {lastSynced.toLocaleString()}
-              {subtleSync && " · checking…"}
-            </span>
-          )}
-          {dirty && <span className="font-semibold text-amber-700">Unsaved edits</span>}
-          {spreadsheetInput.trim().length > 0 && !spreadsheetId && (
-            <span className="text-red-600">Could not parse spreadsheet ID from that text.</span>
-          )}
-        </div>
+          <div className="relative overflow-hidden rounded-2xl border border-pink-200/60 bg-white/95 shadow-lg shadow-pink-200/25 ring-1 ring-pink-100/50">
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-rose-400 via-pink-500 to-fuchsia-400 opacity-90"
+              aria-hidden
+            />
+            <div className="border-b border-pink-100/80 bg-gradient-to-br from-rose-50/80 via-white to-pink-50/40 px-5 py-6 sm:px-7 sm:py-7">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-pink-600/90">Google Sheets</p>
+                  <h2 className="mt-0.5 bg-gradient-to-r from-pink-700 via-rose-600 to-pink-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-3xl">
+                    Saved sheets
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewLinkError(null);
+                    setNewLinkLabel("");
+                    setNewLinkUrl("");
+                    setNewLinkRange(DEFAULT_RANGE);
+                    setNewLinkOpen(true);
+                  }}
+                  className="shrink-0 self-stretch rounded-xl border border-pink-200/90 bg-white px-4 py-2.5 text-sm font-semibold text-pink-700 shadow-md shadow-pink-100/40 transition hover:border-pink-300 hover:bg-pink-50/90 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 sm:self-start sm:px-5"
+                >
+                  New linked sheet
+                </button>
+              </div>
+              <p className="mt-3 max-w-2xl text-sm leading-relaxed text-neutral-600">
+                Save multiple spreadsheet links (like flashcard collections) and open the one you need. Range and tab
+                choices stay with each link.
+              </p>
+            </div>
+            <div className="px-5 py-6 sm:px-7">
+              {sheetLinks.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-pink-200/80 bg-gradient-to-b from-neutral-50/90 to-white px-6 py-14 text-center shadow-inner">
+                  <p className="text-neutral-600">
+                    No saved sheets yet. Use <strong className="text-neutral-800">New linked sheet</strong> to paste a
+                    URL, then open it to use the worksheet grid.
+                  </p>
+                </div>
+              ) : (
+                <ul className="grid gap-5 sm:grid-cols-2">
+                  {sheetLinks.map((link) => (
+                    <li key={link.id} className="h-full min-h-[11rem]">
+                      <SavedGoogleSheetCard
+                        link={link}
+                        onOpen={() => openSheetLink(link.id)}
+                        onConfigure={() => openLinkConnectionModal(link.id)}
+                        onRename={() => {
+                          setRenameLabelDraft(link.label);
+                          setRenameError(null);
+                          setRenamingLink(link);
+                        }}
+                        onRemove={() => removeSheetLink(link.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <>
+          <nav
+            className="flex max-w-full min-w-0 flex-wrap items-center gap-2 rounded-full border border-pink-100/90 bg-white/90 px-1 py-1 text-sm shadow-sm shadow-pink-100/50 backdrop-blur-sm"
+            aria-label="Linked sheet breadcrumb"
+          >
+            <button
+              type="button"
+              onClick={goToAllSheets}
+              className="rounded-full px-3 py-1.5 font-medium text-pink-700 transition hover:bg-pink-50"
+            >
+              ← All linked sheets
+            </button>
+            <span className="text-pink-200" aria-hidden>
+              /
+            </span>
+            <span className="min-w-0 truncate px-2 font-semibold text-neutral-900">
+              {activeLink?.label ?? "Sheet"}
+            </span>
+          </nav>
+
+          <div className="mb-4 space-y-3">
+            {status && !status.oauthClientConfigured && (
+              <p className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
+                Add <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_ID</code> and{" "}
+                <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_SECRET</code> to{" "}
+                <code className="rounded bg-amber-100 px-1">.env.local</code>, then open{" "}
+                <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
+                  Connect Google
+                </a>{" "}
+                and paste <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> from the result page.
+              </p>
+            )}
+            {status?.oauthClientConfigured && !status.refreshTokenSet && (
+              <p className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
+                Open{" "}
+                <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
+                  Connect Google
+                </a>{" "}
+                in this browser, approve access, then add{" "}
+                <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> to{" "}
+                <code className="rounded bg-amber-100 px-1">.env.local</code> and restart the dev server.
+              </p>
+            )}
+            {error && (
+              <p className="text-sm font-medium text-red-600" role="alert">
+                {error}
+              </p>
+            )}
+            {formatWarning && !error && (
+              <p
+                className="rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-sm text-amber-950"
+                role="status"
+              >
+                Showing values only (formatting could not be loaded). {formatWarning}
+              </p>
+            )}
+            {spreadsheetInput.trim().length > 0 && !spreadsheetId && (
+              <p className="text-sm font-medium text-red-600">Could not parse spreadsheet ID from that text.</p>
+            )}
+          </div>
 
       {showWorksheetGrid && (
-        <div className="relative min-w-0 max-w-full overflow-clip rounded-2xl border border-neutral-200/80 bg-white shadow-lg shadow-neutral-200/30 ring-1 ring-pink-100/40">
+        <div
+          className={`relative min-w-0 max-w-full overflow-clip rounded-2xl border border-neutral-200/80 bg-white shadow-lg shadow-neutral-200/30 ring-1 ring-pink-100/40 transition-shadow ${saveFlash ? "shadow-emerald-100/30 ring-2 ring-emerald-400/70" : ""}`}
+        >
           <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-pink-400 via-rose-400 to-fuchsia-400 opacity-80" aria-hidden />
           <div className="border-b border-neutral-100/95 bg-gradient-to-r from-neutral-50/90 to-white px-5 py-4 sm:px-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1330,19 +1461,144 @@ export function WorkspaceGoogleSheetSection() {
                   )}
                 </p>
               </div>
-              <button
-                type="button"
-                disabled={
-                  saving ||
-                  loading ||
-                  values.length === 0 ||
-                  (needsTabForCells && effectiveSheetGid == null)
-                }
-                onClick={() => void saveToGoogle()}
-                className="shrink-0 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-pink-300/35 transition hover:from-pink-700 hover:to-rose-700 disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                {saving ? "Saving…" : "Save"}
-              </button>
+              <div className="flex shrink-0 items-start gap-1.5">
+                <button
+                  type="button"
+                  disabled={!activeLinkId}
+                  onClick={() => activeLinkId && openLinkConnectionModal(activeLinkId)}
+                  className={`${btnGhost} inline-flex h-9 w-9 shrink-0 items-center justify-center p-0`}
+                  title="Connection settings"
+                  aria-label="Spreadsheet connection settings"
+                >
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    saving ||
+                    loading ||
+                    values.length === 0 ||
+                    (needsTabForCells && effectiveSheetGid == null)
+                  }
+                  onClick={() => void saveToGoogle()}
+                  className="shrink-0 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-pink-300/35 transition hover:from-pink-700 hover:to-rose-700 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 border-t border-neutral-100/80 pt-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+                <div className="min-w-0 flex-1">
+                  <label
+                    className="text-xs font-semibold uppercase tracking-wide text-neutral-500"
+                    htmlFor="worksheet-sheet-tab-select"
+                  >
+                    Sheet tab
+                  </label>
+                  <div className="relative mt-1.5 max-w-md">
+                    <select
+                      id="worksheet-sheet-tab-select"
+                      value={selectedSheetId == null ? "" : String(selectedSheetId)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "") {
+                          setSelectedSheetId(null);
+                          return;
+                        }
+                        const n = parseInt(v, 10);
+                        if (!Number.isFinite(n)) return;
+                        setSelectedSheetId(n);
+                        try {
+                          if (spreadsheetId) {
+                            localStorage.setItem(sheetIdStorageKey(spreadsheetId), String(n));
+                          }
+                        } catch {
+                          /* ignore */
+                        }
+                      }}
+                      disabled={!spreadsheetId || tabsLoading || sheetTabs.length === 0}
+                      className="h-11 w-full cursor-pointer appearance-none rounded-xl border-2 border-pink-200/80 bg-gradient-to-b from-white to-pink-50/40 pl-3.5 pr-10 text-sm font-semibold text-neutral-900 shadow-sm outline-none transition hover:border-pink-300 hover:shadow-md focus:border-pink-400 focus:ring-2 focus:ring-pink-200/80 disabled:cursor-not-allowed disabled:opacity-55"
+                    >
+                      <option value="">
+                        {tabsLoading ? "Loading tabs…" : "Choose a sheet tab…"}
+                      </option>
+                      {sheetTabs.map((t) => (
+                        <option key={t.sheetId} value={String(t.sheetId)}>
+                          {t.title}
+                        </option>
+                      ))}
+                    </select>
+                    <span
+                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-pink-600"
+                      aria-hidden
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </span>
+                  </div>
+                  <span className="mt-1.5 block text-xs text-neutral-500">
+                    Required when the range has no tab name. Your choice is saved for this spreadsheet.
+                  </span>
+                  {tabsError && (
+                    <p className="mt-2 text-xs font-medium text-red-600" role="alert">
+                      {tabsError}
+                    </p>
+                  )}
+                </div>
+                <div className="flex min-w-0 shrink-0 flex-col gap-1.5 sm:max-w-[20rem] sm:items-end sm:text-right">
+                  {lastSynced && (
+                    <p className="text-xs tabular-nums text-neutral-500">
+                      Last synced: {lastSynced.toLocaleString()}
+                      {subtleSync && " · checking…"}
+                    </p>
+                  )}
+                  {loading && spreadsheetId && (
+                    <span className="inline-flex items-center justify-end gap-1.5 text-xs font-medium text-pink-800">
+                      <span
+                        className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-pink-200 border-t-pink-600"
+                        aria-hidden
+                      />
+                      Loading sheet…
+                    </span>
+                  )}
+                  {dirty && (
+                    <span className="text-xs font-semibold text-amber-700">Unsaved grid edits</span>
+                  )}
+                  {lastSaveAt && (
+                    <p className="text-xs font-medium text-emerald-700/90">
+                      Saved to Google {lastSaveAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2 pt-0.5 sm:justify-end">
+                    {sheetUrl && (
+                      <a
+                        href={sheetUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`${btnNeutral} inline-flex px-3 py-1.5 text-xs font-semibold`}
+                      >
+                        Open in Sheets
+                      </a>
+                    )}
+                    <a
+                      href="/api/google-sheets/auth"
+                      className={`${btnNeutral} inline-flex px-3 py-1.5 text-xs font-medium text-neutral-600`}
+                    >
+                      Connect Google
+                    </a>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2">
@@ -1706,6 +1962,297 @@ export function WorkspaceGoogleSheetSection() {
           )}
         </div>
       </div>
+        </>
+      )}
+
+      {linkConnectionModalId != null && (
+        <div
+          className="fixed inset-0 z-[500] flex items-center justify-center bg-black/30 p-4"
+          onClick={() => {
+            setLinkConnectionModalId(null);
+            setLinkConnectionError(null);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-pink-100"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="link-connection-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-pink-100 px-5 py-4">
+              <h2 id="link-connection-modal-title" className="text-lg font-semibold text-neutral-900">
+                Connection settings
+              </h2>
+              <p className="mt-1 text-sm text-neutral-500">
+                {sheetLinks.find((l) => l.id === linkConnectionModalId)?.label ?? "Linked sheet"}
+              </p>
+            </div>
+            <div className="space-y-4 p-5">
+              <label className="block text-sm font-medium text-neutral-800">
+                Spreadsheet URL or ID
+                <input
+                  type="text"
+                  value={linkConnectionDraft.spreadsheetInput}
+                  onChange={(e) =>
+                    setLinkConnectionDraft((d) => ({
+                      ...d,
+                      spreadsheetInput: e.target.value,
+                    }))
+                  }
+                  placeholder="https://docs.google.com/spreadsheets/d/…"
+                  spellCheck={false}
+                  className="mt-1.5 w-full rounded-xl border border-pink-100 bg-white px-3 py-2.5 font-mono text-xs text-neutral-900 shadow-inner outline-none ring-pink-200 focus:border-pink-300 focus:ring-2 focus:ring-pink-200 sm:text-sm"
+                />
+                <span className="mt-1 block text-xs font-normal text-neutral-500">
+                  Saved with this link in your browser. Pick the sheet tab in the worksheet grid when the range has no
+                  tab name.
+                </span>
+                {(() => {
+                  const ds = parseSpreadsheetId(linkConnectionDraft.spreadsheetInput.trim());
+                  return Boolean(ds && spreadsheetIdLooksIncomplete(ds));
+                })() && (
+                  <span className="mt-1 block text-xs font-medium text-amber-800">
+                    This ID looks cut off. Copy the full URL from the address bar (the part after{" "}
+                    <code className="rounded bg-amber-100 px-1">/d/</code> is usually ~44 characters).
+                  </span>
+                )}
+              </label>
+              <label className="block text-sm font-medium text-neutral-800">
+                Range (A1 notation)
+                <input
+                  type="text"
+                  value={linkConnectionDraft.range}
+                  onChange={(e) =>
+                    setLinkConnectionDraft((d) => ({ ...d, range: e.target.value }))
+                  }
+                  onBlur={() =>
+                    setLinkConnectionDraft((d) => ({
+                      ...d,
+                      range: normalizeSheetsA1Range(d.range),
+                    }))
+                  }
+                  placeholder={DEFAULT_RANGE}
+                  spellCheck={false}
+                  className="mt-1.5 w-full rounded-xl border border-pink-100 bg-white px-3 py-2.5 font-mono text-sm text-neutral-900 shadow-inner outline-none ring-pink-200 focus:border-pink-300 focus:ring-2 focus:ring-pink-200"
+                />
+                <span className="mt-1 block text-xs font-normal text-neutral-500">
+                  For <code className="rounded bg-pink-50 px-1">A1:AA200</code>, choose the sheet tab in the worksheet
+                  grid. Or use a range with a tab name, e.g.{" "}
+                  <code className="rounded bg-pink-50 px-1 text-[11px]">{"'Quiz new'!A1:AA200"}</code>.
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-neutral-700">
+                <input
+                  type="checkbox"
+                  checked={linkConnectionDraft.importFormatting}
+                  onChange={(e) =>
+                    setLinkConnectionDraft((d) => ({
+                      ...d,
+                      importFormatting: e.target.checked,
+                    }))
+                  }
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-pink-300 text-pink-600 focus:ring-pink-500"
+                />
+                <span>
+                  Import cell formatting (background, text style, alignment). Includes{" "}
+                  <strong className="font-semibold text-neutral-800">conditional formatting</strong> as rendered in
+                  Google Sheets. Slightly larger API response.
+                </span>
+              </label>
+              {linkConnectionError && (
+                <p className="text-sm text-red-600" role="alert">
+                  {linkConnectionError}
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-pink-50 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setLinkConnectionModalId(null);
+                  setLinkConnectionError(null);
+                }}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveLinkConnectionModal()}
+                className="rounded-lg bg-gradient-to-r from-pink-600 to-rose-600 px-4 py-2 text-sm font-bold text-white shadow-md shadow-pink-200/40 hover:from-pink-700 hover:to-rose-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newLinkOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="new-sheet-link-title"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
+            <div className="border-b border-pink-100 px-5 py-4">
+              <h2 id="new-sheet-link-title" className="text-lg font-semibold text-neutral-900">
+                New linked sheet
+              </h2>
+              <p className="mt-1 text-sm text-neutral-500">
+                Paste a spreadsheet URL or ID. You can rename it anytime from the card list.
+              </p>
+            </div>
+            <div className="space-y-4 p-5">
+              <label className="block text-xs font-medium text-neutral-600">
+                Display name
+                <input
+                  type="text"
+                  value={newLinkLabel}
+                  onChange={(e) => setNewLinkLabel(e.target.value)}
+                  placeholder="e.g. Quiz grades"
+                  className="mt-1.5 w-full rounded-lg border border-pink-100 bg-[#fffafc] px-3 py-2.5 text-sm text-neutral-900 outline-none ring-pink-300 focus:ring-2"
+                  maxLength={120}
+                />
+              </label>
+              <label className="block text-xs font-medium text-neutral-600">
+                Spreadsheet URL or ID
+                <input
+                  type="text"
+                  value={newLinkUrl}
+                  onChange={(e) => setNewLinkUrl(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/…"
+                  spellCheck={false}
+                  className="mt-1.5 w-full rounded-lg border border-pink-100 bg-white px-3 py-2.5 font-mono text-xs text-neutral-900 outline-none ring-pink-300 focus:ring-2 sm:text-sm"
+                />
+              </label>
+              <label className="block text-xs font-medium text-neutral-600">
+                Range (A1 notation)
+                <input
+                  type="text"
+                  value={newLinkRange}
+                  onChange={(e) => setNewLinkRange(e.target.value)}
+                  onBlur={() => setNewLinkRange((r) => normalizeSheetsA1Range(r))}
+                  placeholder={DEFAULT_RANGE}
+                  spellCheck={false}
+                  className="mt-1.5 w-full rounded-lg border border-pink-100 bg-white px-3 py-2.5 font-mono text-sm text-neutral-900 outline-none ring-pink-300 focus:ring-2"
+                />
+              </label>
+              {newLinkError && (
+                <p className="text-sm text-red-600" role="alert">
+                  {newLinkError}
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-pink-50 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setNewLinkOpen(false);
+                  setNewLinkError(null);
+                }}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={newLinkBusy}
+                onClick={() => void submitNewSheetLink()}
+                className="rounded-lg bg-gradient-to-r from-pink-600 to-rose-600 px-4 py-2 text-sm font-bold text-white shadow-md shadow-pink-200/40 hover:from-pink-700 hover:to-rose-700 disabled:opacity-50"
+              >
+                {newLinkBusy ? "Adding…" : "Add & open"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renamingLink != null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="rename-sheet-link-title"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
+            <div className="border-b border-pink-100 px-5 py-4">
+              <h2 id="rename-sheet-link-title" className="text-lg font-semibold text-neutral-900">
+                Rename linked sheet
+              </h2>
+              <p className="mt-1 text-sm text-neutral-500">This name appears in your list and breadcrumb.</p>
+            </div>
+            <div className="p-5">
+              <label className="block text-xs font-medium text-neutral-600">
+                Name
+                <input
+                  type="text"
+                  className="mt-1.5 w-full rounded-lg border border-pink-100 bg-[#fffafc] px-3 py-2.5 text-sm text-neutral-900 outline-none ring-pink-300 focus:ring-2"
+                  value={renameLabelDraft}
+                  onChange={(e) => setRenameLabelDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const t = renameLabelDraft.trim();
+                      if (!t) {
+                        setRenameError("Enter a name.");
+                        return;
+                      }
+                      setSheetLinks((prev) =>
+                        prev.map((l) =>
+                          l.id === renamingLink.id ? { ...l, label: t } : l
+                        )
+                      );
+                      setRenamingLink(null);
+                      setRenameError(null);
+                    }
+                  }}
+                  autoFocus
+                  maxLength={120}
+                />
+              </label>
+              {renameError && (
+                <p className="mt-2 text-sm text-red-600" role="alert">
+                  {renameError}
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-pink-50 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setRenamingLink(null);
+                  setRenameError(null);
+                }}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const t = renameLabelDraft.trim();
+                  if (!t) {
+                    setRenameError("Enter a name.");
+                    return;
+                  }
+                  setSheetLinks((prev) =>
+                    prev.map((l) =>
+                      l.id === renamingLink.id ? { ...l, label: t } : l
+                    )
+                  );
+                  setRenamingLink(null);
+                  setRenameError(null);
+                }}
+                className="rounded-lg bg-gradient-to-r from-pink-600 to-rose-600 px-4 py-2 text-sm font-bold text-white shadow-md shadow-pink-200/40 hover:from-pink-700 hover:to-rose-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {freezeMenuLayout != null &&
         createPortal(
