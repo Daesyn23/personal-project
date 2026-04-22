@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { GeminiChatWidget } from "@/components/GeminiChatWidget";
 import { PinGate } from "@/components/PinGate";
 import { SeasonalBackground } from "@/components/SeasonalBackground";
 import "./globals.css";
@@ -30,7 +31,12 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} relative min-h-screen antialiased`}>
         <SeasonalBackground />
         <div className="relative z-10">
-          <PinGate>{children}</PinGate>
+          <PinGate>
+            <>
+              {children}
+              <GeminiChatWidget />
+            </>
+          </PinGate>
         </div>
       </body>
     </html>
