@@ -246,7 +246,62 @@ body {
   opacity: 1;
 }
 
+/* Timer finish: sakura burst from center (CSS vars --dx --dy --rot per petal) */
+.workspace-timer-sakura-burst-petal {
+  border-radius: 60% 60% 45% 45% / 70% 70% 35% 35%;
+  background: linear-gradient(145deg, rgba(255, 182, 220, 0.96), rgba(251, 113, 133, 0.88));
+  box-shadow: 0 1px 4px rgba(236, 72, 153, 0.18);
+  transform-origin: center center;
+  opacity: 0;
+  animation: workspace-timer-sakura-firework cubic-bezier(0.12, 0.82, 0.22, 1) forwards;
+}
+
+/* Softer petals over the clock zone (mask is alpha: dark = full petals, light center = more transparent). */
+.workspace-timer-finish-firework-layer--overlap-fade {
+  -webkit-mask-image: radial-gradient(
+    ellipse 52% 48% at 50% 40%,
+    rgba(0, 0, 0, 0.2) 0%,
+    rgba(0, 0, 0, 0.52) 30%,
+    rgba(0, 0, 0, 0.9) 56%,
+    #000 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 52% 48% at 50% 40%,
+    rgba(0, 0, 0, 0.2) 0%,
+    rgba(0, 0, 0, 0.52) 30%,
+    rgba(0, 0, 0, 0.9) 56%,
+    #000 100%
+  );
+  mask-mode: alpha;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  mask-size: 100% 100%;
+  -webkit-mask-size: 100% 100%;
+}
+
+@keyframes workspace-timer-sakura-firework {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.08) rotate(0deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+    transform: translate3d(calc(var(--dx) * 0.12), calc(var(--dy) * 0.12), 0) scale(1.05) rotate(calc(var(--rot) * 0.08));
+  }
+  58% {
+    opacity: 0.92;
+  }
+  100% {
+    transform: translate3d(var(--dx), var(--dy), 0) scale(0.72) rotate(var(--rot));
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .workspace-timer-sakura-burst-petal {
+    animation: none !important;
+    opacity: 0 !important;
+  }
   .workspace-timer-finished-digit {
     animation: none;
     color: #e11d48;

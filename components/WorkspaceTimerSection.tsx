@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 function clampInt(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min;
@@ -37,6 +38,28 @@ function formatClockSpaced(totalSeconds: number, finished: boolean): string {
 }
 
 const FINISH_ALARM_SECONDS = 5;
+
+/** Sakura firework burst from center when time’s up; cleared after animation. */
+const FINISH_FIREWORK_PETAL_COUNT = 96;
+const FINISH_FIREWORK_CLEAR_MS = 4000;
+
+function buildSakuraFireworkPetals(seed: number, count: number) {
+  return Array.from({ length: count }, (_, i) => {
+    const baseAngle = (i / count) * Math.PI * 2;
+    const jitter = ((((i * 47 + seed * 9) % 360) - 180) * Math.PI) / 180 * 0.18;
+    const angle = baseAngle + jitter;
+    const dist = 215 + ((i * 73 + seed * 5) % 480);
+    const dx = Math.round(Math.cos(angle) * dist * 10) / 10;
+    const dy =
+      Math.round((Math.sin(angle) * dist * 0.62 + dist * 0.17 + 28 + ((i * 11 + seed) % 36)) * 10) / 10;
+    const rot = ((i * 97 + seed * 3) % 720) - 360;
+    const delay = ((i % 7) * 0.026);
+    const dur = 2.2 + ((i * 13 + seed) % 80) / 100;
+    const w = 7 + (i % 5);
+    const h = 10 + (i % 6);
+    return { id: `timer-fw-${seed}-${i}`, dx, dy, rot, delay, dur, w, h };
+  });
+}
 
 /** ~5s soft repeating tones when the countdown completes — even level (no fade), Web Audio. */
 function playTimerFinishedChime() {
@@ -108,6 +131,8 @@ export function WorkspaceTimerSection() {
   const [fullscreen, setFullscreen] = useState(false);
   /** First 5s after time's up: alternating colors; then solid red. */
   const [finishDigitPhase, setFinishDigitPhase] = useState<"none" | "pulse" | "solid">("none");
+  const [finishBurstKey, setFinishBurstKey] = useState(0);
+  const [showFinishFirework, setShowFinishFirework] = useState(false);
 
   const syncDurationFromInputs = useCallback(() => {
     const next = parseDurationHms(hoursInput, minutesInput, secondsInput);
@@ -156,6 +181,17 @@ export function WorkspaceTimerSection() {
   useEffect(() => {
     if (!finished) return;
     const tid = window.setTimeout(() => setFinishDigitPhase("solid"), FINISH_ALARM_SECONDS * 1000);
+    return () => window.clearTimeout(tid);
+  }, [finished]);
+
+  useEffect(() => {
+    if (!finished) {
+      setShowFinishFirework(false);
+      return;
+    }
+    setFinishBurstKey((k) => k + 1);
+    setShowFinishFirework(true);
+    const tid = window.setTimeout(() => setShowFinishFirework(false), FINISH_FIREWORK_CLEAR_MS);
     return () => window.clearTimeout(tid);
   }, [finished]);
 
@@ -245,6 +281,14 @@ export function WorkspaceTimerSection() {
   /** Fullscreen: center clock when setup cards are hidden (running, paused mid, or finished). */
   const fullscreenFocusLayout = hidePresetCards && fullscreen;
 
+  /** H : MM : SS is longer than MM : SS — keep one line with slightly smaller type when hours remain. */
+  const clockHasHours = !finished && remainingSeconds >= 3600;
+
+  const fireworkPetals = useMemo(() => {
+    if (finishBurstKey === 0) return [];
+    return buildSakuraFireworkPetals(finishBurstKey, FINISH_FIREWORK_PETAL_COUNT);
+  }, [finishBurstKey]);
+
   return (
     <section className="overflow-hidden rounded-2xl border border-pink-200/80 bg-white/95 shadow-lg shadow-pink-200/30 sm:rounded-3xl">
       <div className="border-b border-pink-100/90 bg-gradient-to-r from-pink-50/80 via-white to-rose-50/50 px-5 py-6 sm:px-8 sm:py-7">
@@ -273,17 +317,47 @@ export function WorkspaceTimerSection() {
           </>
         )}
 
+        {showFinishFirework && (
+          <div
+            className="workspace-timer-finish-firework-layer workspace-timer-finish-firework-layer--overlap-fade pointer-events-none absolute inset-0 z-[2] overflow-hidden motion-reduce:hidden"
+            aria-hidden
+          >
+            {fireworkPetals.map((p) => (
+              <span key={p.id} className="absolute left-1/2 top-[40%] -translate-x-1/2 -translate-y-1/2">
+                <span
+                  className="workspace-timer-sakura-burst-petal block will-change-transform"
+                  style={
+                    {
+                      width: p.w,
+                      height: p.h,
+                      animationDelay: `${p.delay}s`,
+                      animationDuration: `${p.dur}s`,
+                      "--dx": `${p.dx}px`,
+                      "--dy": `${p.dy}px`,
+                      "--rot": `${p.rot}deg`,
+                    } as CSSProperties & Record<"--dx" | "--dy" | "--rot", string>
+                  }
+                />
+              </span>
+            ))}
+          </div>
+        )}
+
         <div
-          className={`relative z-[1] flex w-full flex-col items-center px-4 py-10 sm:px-8 sm:py-12 ${
-            fullscreenFocusLayout ? "min-h-0 flex-1 justify-center" : ""
-          }`}
+          className={`relative flex w-full flex-col items-center px-4 py-10 sm:px-8 sm:py-12 ${
+            showFinishFirework ? "z-[4]" : "z-[1]"
+          } ${fullscreenFocusLayout ? "min-h-0 flex-1 justify-center" : ""}`}
         >
         <div className={`flex w-full flex-col items-center gap-3 ${fullscreen ? "max-w-2xl" : "max-w-lg"}`}>
           <div
             className={`relative w-full rounded-3xl px-6 py-8 text-center sm:px-10 sm:py-10 ${
               fullscreen
-                ? "border border-pink-100/80 bg-white/95 shadow-lg shadow-pink-200/25 ring-1 ring-pink-100/90"
-                : "bg-white/90 shadow-inner shadow-pink-100/60 ring-1 ring-pink-100/90"
+                ? showFinishFirework
+                  ? "border border-pink-100/80 bg-white shadow-lg shadow-pink-200/25 ring-1 ring-pink-100/90"
+                  : "border border-pink-100/80 bg-white/95 shadow-lg shadow-pink-200/25 ring-1 ring-pink-100/90"
+                : showFinishFirework
+                  ? "bg-white shadow-inner shadow-pink-100/60 ring-1 ring-pink-100/90"
+                  : "bg-white/90 shadow-inner shadow-pink-100/60 ring-1 ring-pink-100/90"
             } ${finished ? "ring-rose-200/90" : ""}`}
           >
             {statusLabel && (
@@ -296,8 +370,14 @@ export function WorkspaceTimerSection() {
               </p>
             )}
             <div
-              className={`font-mono font-bold tabular-nums tracking-tight ${
-                fullscreen ? "text-[min(14vw,6.5rem)] tracking-wide" : "text-5xl sm:text-6xl"
+              className={`font-mono font-bold tabular-nums tracking-tight whitespace-nowrap leading-none ${
+                fullscreen
+                  ? clockHasHours
+                    ? "text-[clamp(1rem,6.2vmin,5rem)] tracking-wide"
+                    : "text-[min(14vw,6.5rem)] tracking-wide"
+                  : clockHasHours
+                    ? "text-4xl sm:text-5xl"
+                    : "text-5xl sm:text-6xl"
               } ${
                 finishDigitPhase === "pulse"
                   ? "workspace-timer-finished-digit"

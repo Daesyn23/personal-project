@@ -36,6 +36,9 @@ import { normalizeSheetsA1Range, spreadsheetIdLooksIncomplete } from "@/lib/shee
 /** Cell-only range; sheet tab comes from the dropdown (or explicit 'Name'! in the field). */
 const DEFAULT_RANGE = DEFAULT_SHEETS_CELL_RANGE;
 
+/** After local edits (`dirty`), push to Google Sheets if nothing changes for this long. */
+const GOOGLE_SHEET_IDLE_SAVE_MS = 5000;
+
 function sheetIdStorageKey(spreadsheetId: string): string {
   return `workspace_google_sheets_sheet_${spreadsheetId}`;
 }
@@ -343,6 +346,8 @@ export function WorkspaceGoogleSheetSection() {
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloudPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleGoogleSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingRef = useRef(false);
   const [cloudApplyEpoch, setCloudApplyEpoch] = useState(0);
   const collectArgsRef = useRef<CollectSheetsStateArgs>({
     activeSpreadsheetId: null,
@@ -1073,8 +1078,10 @@ export function WorkspaceGoogleSheetSection() {
     setDirty(true);
   };
 
-  const saveToGoogle = async () => {
+  const saveToGoogle = useCallback(async () => {
     if (!spreadsheetId) return;
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     try {
@@ -1111,9 +1118,53 @@ export function WorkspaceGoogleSheetSection() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
-  };
+  }, [spreadsheetId, range, selectedSheetId, sheetGid, values]);
+
+  useEffect(() => {
+    const saveDisabled =
+      saving ||
+      loading ||
+      values.length === 0 ||
+      (needsTabForCells && effectiveSheetGid == null) ||
+      !spreadsheetId ||
+      !status?.canQuery;
+
+    const clearIdleTimer = () => {
+      if (idleGoogleSaveTimerRef.current) {
+        clearTimeout(idleGoogleSaveTimerRef.current);
+        idleGoogleSaveTimerRef.current = null;
+      }
+    };
+
+    if (!dirty || saveDisabled) {
+      clearIdleTimer();
+      return;
+    }
+
+    clearIdleTimer();
+    idleGoogleSaveTimerRef.current = setTimeout(() => {
+      idleGoogleSaveTimerRef.current = null;
+      if (!dirtyRef.current) return;
+      if (savingRef.current) return;
+      void saveToGoogle();
+    }, GOOGLE_SHEET_IDLE_SAVE_MS);
+
+    return clearIdleTimer;
+  }, [
+    dirty,
+    values,
+    cellMeta,
+    saving,
+    loading,
+    needsTabForCells,
+    effectiveSheetGid,
+    spreadsheetId,
+    status?.canQuery,
+    saveToGoogle,
+  ]);
 
   const onRefresh = () => {
     if (dirty) {
