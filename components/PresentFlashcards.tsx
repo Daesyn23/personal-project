@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { cancelSpeechSynthesis } from "@/lib/japanese-tts";
 import type { FlashcardRow } from "@/lib/types";
 import { FlashcardSlide } from "@/components/FlashcardSlide";
 import {
@@ -33,6 +34,10 @@ export function PresentFlashcards({
   useEffect(() => {
     if (open && cards.length === 0) onClose();
   }, [open, cards.length, onClose]);
+
+  useEffect(() => {
+    if (!open) cancelSpeechSynthesis();
+  }, [open]);
 
   const advance = useCallback(() => {
     const n = cards.length;
@@ -123,7 +128,7 @@ export function PresentFlashcards({
 
       <div className="flex flex-1 items-center justify-center overflow-auto p-4 sm:p-6">
         <div
-          key={`${card.id}-${phase}`}
+          key={card.id}
           className="flashcard-enter w-full max-w-3xl"
         >
           <FlashcardSlide card={card} phase={phase} />

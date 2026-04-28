@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { cancelSpeechSynthesis, speakJapaneseLine } from "@/lib/japanese-tts";
+import { useSpeechActivationHandlers } from "@/lib/useSpeechActivationHandlers";
 
 const MAX_INPUT = 2500;
 
@@ -17,6 +19,12 @@ const btnPrimary =
 
 const btnGhost =
   "inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-stone-300 bg-stone-50 px-4 py-2 text-xs font-semibold text-stone-800 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300/50 disabled:opacity-40";
+
+const btnSpeak =
+  "inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-pink-900 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300/50";
+
+const btnStopSpeak =
+  "inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-900 shadow-sm transition hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400";
 
 type GrammarIssue = { problem: string; whyWrong: string; fix: string };
 
@@ -41,6 +49,8 @@ export function WorkspaceJapaneseGrammarSection() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GrammarResult | null>(null);
   const [copied, setCopied] = useState(false);
+  const [ttsSupported, setTtsSupported] = useState(false);
+  const [speaking, setSpeaking] = useState<"corrected" | "reading" | null>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -56,6 +66,20 @@ export function WorkspaceJapaneseGrammarSection() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    setTtsSupported(true);
+    const synth = window.speechSynthesis;
+    const refresh = () => {
+      synth.getVoices();
+    };
+    refresh();
+    synth.addEventListener("voiceschanged", refresh);
+    return () => {
+      synth.removeEventListener("voiceschanged", refresh);
     };
   }, []);
 
@@ -76,6 +100,8 @@ export function WorkspaceJapaneseGrammarSection() {
     setError(null);
     setResult(null);
     setCopied(false);
+    cancelSpeechSynthesis();
+    setSpeaking(null);
     try {
       const res = await fetch("/api/japanese/grammar-check", {
         method: "POST",
@@ -129,6 +155,65 @@ export function WorkspaceJapaneseGrammarSection() {
       setError("Could not copy to the clipboard.");
     }
   };
+
+  const stopSpeak = useCallback(() => {
+    cancelSpeechSynthesis();
+    setSpeaking(null);
+  }, []);
+
+  const speakCorrected = useCallback(() => {
+    if (!result?.correctedJapanese.trim() || typeof window === "undefined" || !window.speechSynthesis) return;
+    setError(null);
+    speakJapaneseLine(result.correctedJapanese, "japanese", {
+      onEnd: () => setSpeaking(null),
+      onError: (code) => {
+        setSpeaking(null);
+        if (code === "not-allowed") {
+          setError("Speech was blocked. Allow sound for this site in your browser settings, then try again.");
+          return;
+        }
+        const hint =
+          code && code !== "no-api" && code !== "speak-threw" ? ` (${code})` : "";
+        setError(`Could not play speech${hint}. Check volume, try again, or add a Japanese voice in system settings.`);
+      },
+    });
+    setSpeaking("corrected");
+  }, [result]);
+
+  const speakReading = useCallback(() => {
+    const r = result?.reading?.trim();
+    if (!r || typeof window === "undefined" || !window.speechSynthesis) return;
+    setError(null);
+    speakJapaneseLine(r, "reading", {
+      onEnd: () => setSpeaking(null),
+      onError: (code) => {
+        setSpeaking(null);
+        if (code === "not-allowed") {
+          setError("Speech was blocked. Allow sound for this site in your browser settings, then try again.");
+          return;
+        }
+        const hint =
+          code && code !== "no-api" && code !== "speak-threw" ? ` (${code})` : "";
+        setError(`Could not play speech${hint}. Check volume, try again, or add a Japanese voice in system settings.`);
+      },
+    });
+    setSpeaking("reading");
+  }, [result]);
+
+  const toggleCorrectedSpeak = useCallback(() => {
+    if (!result) return;
+    if (speaking === "corrected") stopSpeak();
+    else speakCorrected();
+  }, [result, speaking, stopSpeak, speakCorrected]);
+
+  const toggleGrammarReadingSpeak = useCallback(() => {
+    if (!result?.reading?.trim()) return;
+    if (speaking === "reading") stopSpeak();
+    else speakReading();
+  }, [result, speaking, stopSpeak, speakReading]);
+
+  const pressCorrected = useSpeechActivationHandlers(toggleCorrectedSpeak);
+  const pressGrammarReading = useSpeechActivationHandlers(toggleGrammarReadingSpeak);
 
   const verdictBadge = () => {
     if (!result) return null;
@@ -372,7 +457,20 @@ export function WorkspaceJapaneseGrammarSection() {
               )}
 
               <div>
-                <h4 className="text-[11px] font-bold uppercase tracking-widest text-emerald-800/90">Corrected line</h4>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-emerald-800/90">Corrected line</h4>
+                  {ttsSupported && result.correctedJapanese.trim() ? (
+                    <button
+                      type="button"
+                      onPointerDown={pressCorrected.onPointerDown}
+                      onClick={pressCorrected.onClick}
+                      className={speaking === "corrected" ? btnStopSpeak : btnSpeak}
+                      aria-label={speaking === "corrected" ? "Stop speech" : "Speak corrected Japanese"}
+                    >
+                      {speaking === "corrected" ? "Stop" : "Speak"}
+                    </button>
+                  ) : null}
+                </div>
                 <p
                   className={`mt-3 whitespace-pre-wrap break-words rounded-lg border-2 border-emerald-300/90 bg-gradient-to-br from-emerald-50 to-green-50/80 px-4 py-4 text-lg font-semibold leading-snug text-stone-900 sm:text-xl ${jpFontClass}`}
                 >
@@ -380,13 +478,26 @@ export function WorkspaceJapaneseGrammarSection() {
                 </p>
                 {includeReading && result.reading ? (
                   <div className="mt-4 rounded-lg border border-pink-200 bg-pink-50/40 px-4 py-3">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-pink-800/80">Reading</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-pink-800/80">Reading</p>
+                      {ttsSupported ? (
+                        <button
+                          type="button"
+                          onPointerDown={pressGrammarReading.onPointerDown}
+                          onClick={pressGrammarReading.onClick}
+                          className={speaking === "reading" ? btnStopSpeak : btnSpeak}
+                          aria-label={speaking === "reading" ? "Stop speech" : "Speak hiragana reading"}
+                        >
+                          {speaking === "reading" ? "Stop" : "Speak"}
+                        </button>
+                      ) : null}
+                    </div>
                     <p className={`mt-1 whitespace-pre-wrap break-words text-base font-medium text-stone-900 ${jpFontClass}`}>
                       {result.reading}
                     </p>
                   </div>
                 ) : null}
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap gap-2">
                   <button type="button" className={btnGhost} onClick={() => void copyCorrected()}>
                     {copied ? "Copied" : "Copy corrected Japanese"}
                   </button>

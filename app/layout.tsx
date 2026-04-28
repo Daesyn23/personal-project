@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { GeminiChatWidget } from "@/components/GeminiChatWidget";
 import { PinGate } from "@/components/PinGate";
 import { SeasonalBackground } from "@/components/SeasonalBackground";
+import { SpeechSynthesisWarmup } from "@/components/SpeechSynthesisWarmup";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,6 +40,7 @@ export default function RootLayout({
       >
         <SeasonalBackground />
         <div className="relative z-10 min-w-0">
+          <SpeechSynthesisWarmup />
           <PinGate>
             <>
               {children}

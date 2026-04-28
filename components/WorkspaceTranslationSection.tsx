@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { cancelSpeechSynthesis, speakJapaneseLine } from "@/lib/japanese-tts";
+import { useSpeechActivationHandlers } from "@/lib/useSpeechActivationHandlers";
 
 const STORAGE_HISTORY = "workspace-en-ja-translation-history-v1";
 const MAX_HISTORY = 24;
@@ -90,21 +92,6 @@ const toneBtn = (active: boolean) =>
       : "border-neutral-200/90 bg-white text-neutral-600 hover:border-pink-200 hover:bg-pink-50/50"
   }`;
 
-function getBestJapaneseVoice(): SpeechSynthesisVoice | undefined {
-  if (typeof window === "undefined") return undefined;
-  const list = window.speechSynthesis.getVoices();
-  return (
-    list.find((v) => v.lang.replace("_", "-").toLowerCase().startsWith("ja")) ||
-    list.find((v) => /Japanese|日本語|Kyoto|Otoya|Hattori/i.test(v.name))
-  );
-}
-
-function stopSpeechSynthesis() {
-  if (typeof window !== "undefined" && window.speechSynthesis) {
-    window.speechSynthesis.cancel();
-  }
-}
-
 export function WorkspaceTranslationSection() {
   const sourceId = useId();
   const contextId = useId();
@@ -139,7 +126,6 @@ export function WorkspaceTranslationSection() {
     synth.addEventListener("voiceschanged", refresh);
     return () => {
       synth.removeEventListener("voiceschanged", refresh);
-      synth.cancel();
     };
   }, []);
 
@@ -194,7 +180,7 @@ export function WorkspaceTranslationSection() {
     setLoading(true);
     setError(null);
     setResult(null);
-    stopSpeechSynthesis();
+    cancelSpeechSynthesis();
     setSpeaking(null);
     try {
       const res = await fetch("/api/translate/en-ja", {
@@ -254,7 +240,7 @@ export function WorkspaceTranslationSection() {
   };
 
   const clearAll = () => {
-    stopSpeechSynthesis();
+    cancelSpeechSynthesis();
     setSpeaking(null);
     setSource("");
     setContext("");
@@ -263,7 +249,7 @@ export function WorkspaceTranslationSection() {
   };
 
   const stopSpeak = useCallback(() => {
-    stopSpeechSynthesis();
+    cancelSpeechSynthesis();
     setSpeaking(null);
   }, []);
 
@@ -276,41 +262,45 @@ export function WorkspaceTranslationSection() {
     if (!trimmed) return;
 
     setError(null);
-    stopSpeechSynthesis();
-
-    const run = () => {
-      const voice = getBestJapaneseVoice();
-      const u = new SpeechSynthesisUtterance(trimmed);
-      u.lang = voice?.lang?.toLowerCase().startsWith("ja") ? voice.lang : "ja-JP";
-      if (voice) u.voice = voice;
-      u.rate = kind === "reading" ? 0.88 : 0.9;
-      u.pitch = 1;
-      u.onend = () => setSpeaking(null);
-      u.onerror = () => {
+    speakJapaneseLine(trimmed, kind, {
+      onEnd: () => setSpeaking(null),
+      onError: (code) => {
         setSpeaking(null);
-        setError("Could not play speech (check browser permissions or try again).");
-      };
-      setSpeaking(kind);
-      window.speechSynthesis.speak(u);
-    };
-
-    if (window.speechSynthesis.getVoices().length === 0) {
-      let ran = false;
-      const finish = () => {
-        if (ran) return;
-        ran = true;
-        window.speechSynthesis.removeEventListener("voiceschanged", finish);
-        run();
-      };
-      window.speechSynthesis.addEventListener("voiceschanged", finish);
-      window.setTimeout(finish, 1600);
-      return;
-    }
-    run();
+        if (code === "not-allowed") {
+          setError(
+            "Speech was blocked. Allow sound / autoplay for this site in your browser settings, then try again."
+          );
+          return;
+        }
+        const hint =
+          code && code !== "no-api" && code !== "speak-threw"
+            ? ` (${code})`
+            : "";
+        setError(
+          `Could not play speech${hint}. Check volume, try again, or add a Japanese voice in system settings.`
+        );
+      },
+    });
+    setSpeaking(kind);
   }, []);
 
+  const toggleJpSpeak = useCallback(() => {
+    if (!result) return;
+    if (speaking === "japanese") stopSpeak();
+    else speakLine(result.japanese, "japanese");
+  }, [result, speaking, stopSpeak, speakLine]);
+
+  const toggleReadSpeak = useCallback(() => {
+    if (!result?.reading) return;
+    if (speaking === "reading") stopSpeak();
+    else speakLine(result.reading, "reading");
+  }, [result, speaking, stopSpeak, speakLine]);
+
+  const pressJp = useSpeechActivationHandlers(toggleJpSpeak);
+  const pressRead = useSpeechActivationHandlers(toggleReadSpeak);
+
   const applyHistory = (h: HistoryRow) => {
-    stopSpeechSynthesis();
+    cancelSpeechSynthesis();
     setSpeaking(null);
     setSource(h.source);
     setTone(h.tone);
@@ -500,7 +490,24 @@ export function WorkspaceTranslationSection() {
             {result && !loading && (
               <div className="flex flex-1 flex-col gap-6" lang="ja">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-pink-600/90">Japanese</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-pink-600/90">Japanese</p>
+                    {ttsSupported ? (
+                      <button
+                        type="button"
+                        onPointerDown={pressJp.onPointerDown}
+                        onClick={pressJp.onClick}
+                        className={
+                          speaking === "japanese"
+                            ? `${btnStopSpeak} shrink-0 py-1.5 text-xs min-h-9`
+                            : `${btnGhost} shrink-0 py-1.5 text-xs min-h-9`
+                        }
+                        aria-label={speaking === "japanese" ? "Stop speech" : "Speak Japanese translation"}
+                      >
+                        {speaking === "japanese" ? "Stop" : "Speak"}
+                      </button>
+                    ) : null}
+                  </div>
                   <p
                     className={`mt-2 whitespace-pre-wrap break-words text-2xl font-semibold leading-snug text-neutral-900 sm:text-[1.65rem] ${jpFontClass}`}
                   >
@@ -509,7 +516,24 @@ export function WorkspaceTranslationSection() {
                 </div>
                 {includeReading && result.reading && (
                   <div className="rounded-xl border border-rose-100 bg-rose-50/50 px-4 py-3.5">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-rose-700/90">Reading</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-rose-700/90">Reading</p>
+                      {ttsSupported ? (
+                        <button
+                          type="button"
+                          onPointerDown={pressRead.onPointerDown}
+                          onClick={pressRead.onClick}
+                          className={
+                            speaking === "reading"
+                              ? `${btnStopSpeak} shrink-0 py-1.5 text-xs min-h-9`
+                              : `${btnGhost} shrink-0 py-1.5 text-xs min-h-9`
+                          }
+                          aria-label={speaking === "reading" ? "Stop speech" : "Speak hiragana reading"}
+                        >
+                          {speaking === "reading" ? "Stop" : "Speak"}
+                        </button>
+                      ) : null}
+                    </div>
                     <p className={`mt-2 text-base leading-relaxed text-rose-950 sm:text-lg ${jpFontClass}`}>
                       {result.reading}
                     </p>
@@ -561,27 +585,22 @@ export function WorkspaceTranslationSection() {
                       <div className={actionGrid}>
                         <button
                           type="button"
-                          className={`${btnGhost} w-full`}
-                          disabled={speaking !== null}
-                          aria-label="Speak Japanese translation"
-                          onClick={() => speakLine(result.japanese, "japanese")}
+                          className={speaking === "japanese" ? `${btnStopSpeak} w-full` : `${btnGhost} w-full`}
+                          aria-label={speaking === "japanese" ? "Stop speech" : "Speak Japanese translation"}
+                          onPointerDown={pressJp.onPointerDown}
+                          onClick={pressJp.onClick}
                         >
-                          {speaking === "japanese" ? "Playing…" : "Speak Japanese"}
+                          {speaking === "japanese" ? "Stop" : "Speak Japanese"}
                         </button>
                         {result.reading ? (
                           <button
                             type="button"
-                            className={`${btnGhost} w-full`}
-                            disabled={speaking !== null}
-                            aria-label="Speak hiragana reading"
-                            onClick={() => speakLine(result.reading!, "reading")}
+                            className={speaking === "reading" ? `${btnStopSpeak} w-full` : `${btnGhost} w-full`}
+                            aria-label={speaking === "reading" ? "Stop speech" : "Speak hiragana reading"}
+                            onPointerDown={pressRead.onPointerDown}
+                            onClick={pressRead.onClick}
                           >
-                            {speaking === "reading" ? "Playing…" : "Speak reading"}
-                          </button>
-                        ) : null}
-                        {speaking !== null ? (
-                          <button type="button" className={`${btnStopSpeak} w-full`} onClick={stopSpeak}>
-                            Stop
+                            {speaking === "reading" ? "Stop" : "Speak reading"}
                           </button>
                         ) : null}
                       </div>

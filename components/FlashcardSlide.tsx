@@ -1,6 +1,11 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FlashcardRow } from "@/lib/types";
 import type { PresentationPhase } from "@/components/presentation-phase";
 import { japaneseLine } from "@/components/presentation-phase";
+import { cancelSpeechSynthesis, speakEnglishLine, speakJapaneseLine } from "@/lib/japanese-tts";
+import { useSpeechActivationHandlers } from "@/lib/useSpeechActivationHandlers";
 
 type Props = {
   card: FlashcardRow;
@@ -109,6 +114,12 @@ function ExampleRomajiLine({ text }: { text: string }) {
   );
 }
 
+const speakBtnClass =
+  "inline-flex min-h-[40px] items-center justify-center rounded-full border border-pink-200/90 bg-white px-4 text-xs font-semibold text-pink-800 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400";
+
+const stopSpeakBtnClass =
+  "inline-flex min-h-[40px] items-center justify-center rounded-full border border-rose-300/90 bg-rose-50 px-4 text-xs font-semibold text-rose-900 shadow-sm transition hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400";
+
 export function FlashcardSlide({ card, phase = "word", className = "" }: Props) {
   const jpLine = japaneseLine(card);
   const cat = card.category_label?.trim();
@@ -121,10 +132,107 @@ export function FlashcardSlide({ card, phase = "word", className = "" }: Props) 
   const contextCard: FlashcardRow =
     jpLine || !def ? card : { ...card, definition: null };
 
+  const [speaking, setSpeaking] = useState(false);
+  const [ttsSupported, setTtsSupported] = useState(false);
+  const [ttsHint, setTtsHint] = useState<string | null>(null);
+  const lastSpeakKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    setTtsSupported(true);
+    const synth = window.speechSynthesis;
+    const refresh = () => {
+      synth.getVoices();
+    };
+    refresh();
+    synth.addEventListener("voiceschanged", refresh);
+    return () => {
+      synth.removeEventListener("voiceschanged", refresh);
+    };
+  }, []);
+
+  useEffect(() => {
+    const key = `${card.id}:${phase}`;
+    if (lastSpeakKeyRef.current !== null && lastSpeakKeyRef.current !== key) {
+      cancelSpeechSynthesis();
+      setSpeaking(false);
+      setTtsHint(null);
+    }
+    lastSpeakKeyRef.current = key;
+  }, [card.id, phase]);
+
+  const canSpeak = Boolean(
+    ttsSupported && (jpLine?.trim() || card.phonetic_reading?.trim() || (card.definition ?? "").trim())
+  );
+
+  const startSpeak = useCallback(() => {
+    const jp = jpLine?.trim();
+    const romaji = card.phonetic_reading?.trim();
+    const gloss = (card.definition ?? "").trim();
+    setTtsHint(null);
+    const onErr = (code?: string) => {
+      setSpeaking(false);
+      const suffix =
+        code && code !== "not-allowed" && code !== "no-api" && code !== "speak-threw" ? ` (${code})` : "";
+      const msg =
+        code === "not-allowed"
+          ? "Speech blocked — allow sound for this site in browser settings."
+          : `Could not play speech${suffix}. Try again or check system volume.`;
+      setTtsHint(msg);
+      window.setTimeout(() => setTtsHint(null), 5000);
+    };
+    if (jp) {
+      speakJapaneseLine(jp, "japanese", {
+        onEnd: () => setSpeaking(false),
+        onError: onErr,
+      });
+      setSpeaking(true);
+    } else if (romaji) {
+      speakEnglishLine(romaji, {
+        onEnd: () => setSpeaking(false),
+        onError: onErr,
+      });
+      setSpeaking(true);
+    } else if (gloss) {
+      speakEnglishLine(gloss, {
+        onEnd: () => setSpeaking(false),
+        onError: onErr,
+      });
+      setSpeaking(true);
+    } else {
+      setSpeaking(false);
+    }
+  }, [card.definition, card.phonetic_reading, jpLine]);
+
+  const handleSpeakToggle = useCallback(() => {
+    if (speaking) {
+      cancelSpeechSynthesis();
+      setSpeaking(false);
+      return;
+    }
+    startSpeak();
+  }, [speaking, startSpeak]);
+
+  const speakPress = useSpeechActivationHandlers(handleSpeakToggle);
+
   return (
     <div
-      className={`flex min-h-[380px] flex-col items-stretch justify-center gap-0 rounded-2xl bg-white px-6 py-12 shadow-lg shadow-pink-100/80 ring-1 ring-pink-100/80 transition-shadow duration-300 sm:px-10 ${className}`}
+      className={`relative flex min-h-[380px] flex-col items-stretch justify-center gap-0 rounded-2xl bg-white px-6 py-12 shadow-lg shadow-pink-100/80 ring-1 ring-pink-100/80 transition-shadow duration-300 sm:px-10 ${className}`}
     >
+      {canSpeak ? (
+        <div className="absolute right-3 top-3 max-w-[min(100%,12rem)] text-right sm:right-4 sm:top-4">
+          <button
+            type="button"
+            onPointerDown={speakPress.onPointerDown}
+            onClick={speakPress.onClick}
+            className={speaking ? stopSpeakBtnClass : speakBtnClass}
+            aria-label={speaking ? "Stop speech" : "Speak card"}
+          >
+            {speaking ? "Stop" : "Speak"}
+          </button>
+          {ttsHint ? <p className="mt-1.5 text-[10px] leading-snug text-rose-700">{ttsHint}</p> : null}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-10 sm:gap-12">
         {/* 1 — Romaji (top, textbook order) */}
         {card.phonetic_reading?.trim() ? (
