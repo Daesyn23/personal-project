@@ -359,9 +359,9 @@ export function WorkspaceJapaneseGrammarSection() {
               )}
 
               <div>
-                <h4 className="text-[11px] font-bold uppercase tracking-widest text-pink-800/90">Corrected line</h4>
+                <h4 className="text-[11px] font-bold uppercase tracking-widest text-emerald-800/90">Corrected line</h4>
                 <p
-                  className={`mt-3 whitespace-pre-wrap break-words rounded-lg border-2 border-pink-200 bg-gradient-to-br from-pink-50/90 to-rose-50/50 px-4 py-4 text-lg font-semibold leading-snug text-stone-900 sm:text-xl ${jpFontClass}`}
+                  className={`mt-3 whitespace-pre-wrap break-words rounded-lg border-2 border-emerald-300/90 bg-gradient-to-br from-emerald-50 to-green-50/80 px-4 py-4 text-lg font-semibold leading-snug text-stone-900 sm:text-xl ${jpFontClass}`}
                 >
                   {result.correctedJapanese}
                 </p>
