@@ -37,6 +37,15 @@ function tileLabel(card: FlashcardRow): string {
 
 type WorkspaceArea = "documents" | "flashcards" | "googleSheet" | "timer" | "translate" | "grammar";
 
+const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
+  { id: "documents", label: "Documents" },
+  { id: "flashcards", label: "Flashcards" },
+  { id: "googleSheet", label: "Google Sheet" },
+  { id: "timer", label: "Timer" },
+  { id: "translate", label: "Translate" },
+  { id: "grammar", label: "Grammar" },
+];
+
 export default function HomePage() {
   const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>("flashcards");
   const [sets, setSets] = useState<CardSetRow[]>([]);
@@ -206,11 +215,11 @@ export default function HomePage() {
   const canReorderCards = Boolean(activeSetId && cards.length > 0 && !cardsLoading && loaded);
 
   return (
-    <div className="min-h-screen bg-transparent">
-      <main className="mx-auto max-w-6xl px-4 py-8 pb-16 sm:px-6 sm:py-12 sm:pb-20">
-        <header className="mb-8 space-y-5 sm:mb-10">
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-            <div>
+    <div className="min-h-screen min-w-0 bg-transparent">
+      <main className="mx-auto w-full min-w-0 max-w-6xl px-3 py-6 pb-14 sm:px-6 sm:py-12 sm:pb-20">
+        <header className="mb-6 min-w-0 space-y-4 sm:mb-10 sm:space-y-5">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+            <div className="min-w-0">
               <p className="text-xs font-medium uppercase tracking-wider text-pink-500/90">Study</p>
               <h1 className="mt-1 bg-gradient-to-r from-pink-600 to-rose-500 bg-clip-text text-3xl font-bold tracking-tight text-transparent sm:text-4xl">
                 My Workspace
@@ -224,7 +233,7 @@ export default function HomePage() {
               )}
             </div>
             {workspaceArea === "flashcards" && (
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-2.5">
                 <NewCollectionButton
                   onCreated={(id) => {
                     void refresh();
@@ -241,74 +250,27 @@ export default function HomePage() {
             )}
           </div>
 
-          <nav className="flex gap-1 border-b border-pink-100/90" aria-label="Workspace areas">
-            <button
-              type="button"
-              onClick={() => setWorkspaceArea("documents")}
-              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
-                workspaceArea === "documents"
-                  ? "border-pink-600 text-pink-700"
-                  : "border-transparent text-neutral-500 hover:text-pink-600"
-              }`}
+          <div className="-mx-3 min-w-0 sm:mx-0">
+            <nav
+              className="flex gap-0.5 overflow-x-auto overscroll-x-contain border-b border-pink-100/90 pb-px [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x sm:gap-1 [&::-webkit-scrollbar]:hidden"
+              aria-label="Workspace areas"
             >
-              Documents
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceArea("flashcards")}
-              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
-                workspaceArea === "flashcards"
-                  ? "border-pink-600 text-pink-700"
-                  : "border-transparent text-neutral-500 hover:text-pink-600"
-              }`}
-            >
-              Flashcards
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceArea("googleSheet")}
-              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
-                workspaceArea === "googleSheet"
-                  ? "border-pink-600 text-pink-700"
-                  : "border-transparent text-neutral-500 hover:text-pink-600"
-              }`}
-            >
-              Google Sheet
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceArea("timer")}
-              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
-                workspaceArea === "timer"
-                  ? "border-pink-600 text-pink-700"
-                  : "border-transparent text-neutral-500 hover:text-pink-600"
-              }`}
-            >
-              Timer
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceArea("translate")}
-              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
-                workspaceArea === "translate"
-                  ? "border-pink-600 text-pink-700"
-                  : "border-transparent text-neutral-500 hover:text-pink-600"
-              }`}
-            >
-              Translate
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceArea("grammar")}
-              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
-                workspaceArea === "grammar"
-                  ? "border-pink-600 text-pink-700"
-                  : "border-transparent text-neutral-500 hover:text-pink-600"
-              }`}
-            >
-              Grammar
-            </button>
-          </nav>
+              {WORKSPACE_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setWorkspaceArea(tab.id)}
+                  className={`relative -mb-px shrink-0 snap-start border-b-2 px-3 py-2 text-xs font-semibold whitespace-nowrap transition sm:px-4 sm:py-2.5 sm:text-sm ${
+                    workspaceArea === tab.id
+                      ? "border-pink-600 text-pink-700"
+                      : "border-transparent text-neutral-500 hover:text-pink-600"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+          </div>
         </header>
 
         {workspaceArea === "documents" ? (
@@ -325,9 +287,9 @@ export default function HomePage() {
           <>
         {activeSetId && (
           <>
-            <div className="mb-6 flex flex-wrap items-center gap-3">
+            <div className="mb-6 flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <nav
-                className="inline-flex max-w-full min-w-0 flex-1 flex-wrap items-center gap-2 rounded-full border border-pink-100/90 bg-white/90 px-1 py-1 text-sm shadow-sm shadow-pink-100/50 backdrop-blur-sm"
+                className="inline-flex max-w-full min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-x-auto rounded-full border border-pink-100/90 bg-white/90 px-1 py-1 text-sm shadow-sm shadow-pink-100/50 backdrop-blur-sm [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x [&::-webkit-scrollbar]:hidden"
                 aria-label="Breadcrumb"
               >
                 <button
@@ -371,7 +333,7 @@ export default function HomePage() {
                       ? "Loading cards…"
                       : "Drag or move cards to change slideshow order"
                 }
-                className="shrink-0 rounded-xl border border-pink-200/90 bg-white px-4 py-2.5 text-sm font-semibold text-pink-700 shadow-md shadow-pink-100/40 transition hover:border-pink-300 hover:bg-pink-50/90 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 disabled:cursor-not-allowed disabled:opacity-45"
+                className="w-full shrink-0 rounded-xl border border-pink-200/90 bg-white px-4 py-2.5 text-sm font-semibold text-pink-700 shadow-md shadow-pink-100/40 transition hover:border-pink-300 hover:bg-pink-50/90 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto"
               >
                 Reorder cards
               </button>

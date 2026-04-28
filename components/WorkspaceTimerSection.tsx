@@ -290,8 +290,8 @@ export function WorkspaceTimerSection() {
   }, [finishBurstKey]);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-pink-200/80 bg-white/95 shadow-lg shadow-pink-200/30 sm:rounded-3xl">
-      <div className="border-b border-pink-100/90 bg-gradient-to-r from-pink-50/80 via-white to-rose-50/50 px-5 py-6 sm:px-8 sm:py-7">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-pink-200/80 bg-white/95 shadow-lg shadow-pink-200/30 sm:rounded-3xl">
+      <div className="border-b border-pink-100/90 bg-gradient-to-r from-pink-50/80 via-white to-rose-50/50 px-4 py-5 sm:px-8 sm:py-7">
         <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-pink-600">Focus</p>
         <h2 className="mt-1.5 text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl">Countdown timer</h2>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-600">

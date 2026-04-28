@@ -45,12 +45,12 @@ export function RenameCollectionModal({ collection, onClose, onSaved }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-3 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="rename-collection-title"
     >
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
+      <div className="w-full min-w-0 max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
         <div className="border-b border-pink-100 px-5 py-4">
           <h2 id="rename-collection-title" className="text-lg font-semibold text-neutral-900">
             Rename collection

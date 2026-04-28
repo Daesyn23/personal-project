@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 const STORAGE_KEY = "workspace-gemini-chat-v1";
 const PANEL_SIZE_KEY = "workspace-gemini-chat-panel-size-v1";
@@ -23,7 +23,7 @@ function clampPanelSize(w: number, h: number): { w: number; h: number } {
       h: Math.round(Math.max(PANEL_MIN_H, Math.min(800, h))),
     };
   }
-  const maxW = Math.min(window.innerWidth - 40, 720);
+  const maxW = Math.min(window.innerWidth - 32, 720);
   const maxH = Math.min(window.innerHeight * 0.88, 800);
   return {
     w: Math.round(Math.max(PANEL_MIN_W, Math.min(maxW, w))),
@@ -235,6 +235,18 @@ export function GeminiChatWidget() {
     return () => window.removeEventListener("resize", onWin);
   }, [open]);
 
+  /** Fit panel to viewport when opening (narrow phones need width clamp immediately). */
+  useLayoutEffect(() => {
+    if (!open) return;
+    setPanelSize((s) => {
+      const n = clampPanelSize(s.w, s.h);
+      if (n.w === s.w && n.h === s.h) return s;
+      panelSizeRef.current = n;
+      persistPanelSize(n);
+      return n;
+    });
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     void (async () => {
@@ -334,7 +346,7 @@ export function GeminiChatWidget() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`fixed bottom-5 right-5 z-[100] flex h-12 w-12 items-center justify-center rounded-full border bg-white/90 text-pink-600 shadow-sm shadow-neutral-900/[0.04] backdrop-blur-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300/70 focus-visible:ring-offset-2 ${
+        className={`fixed z-[100] flex h-12 w-12 items-center justify-center rounded-full border bg-white/90 text-pink-600 shadow-sm shadow-neutral-900/[0.04] backdrop-blur-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300/70 focus-visible:ring-offset-2 max-sm:bottom-[max(1rem,env(safe-area-inset-bottom,0px))] max-sm:right-[max(1rem,env(safe-area-inset-right,0px))] sm:bottom-5 sm:right-5 ${
           open
             ? "border-pink-200/90 text-neutral-600 hover:border-neutral-300 hover:bg-neutral-50/95"
             : "border-neutral-200/90 hover:border-pink-200/70 hover:bg-pink-50/30 hover:text-pink-700"
@@ -350,14 +362,14 @@ export function GeminiChatWidget() {
         <div
           ref={panelRef}
           id="gemini-chat-panel"
-          className="fixed bottom-[4.5rem] right-5 z-[100] flex flex-col overflow-hidden rounded-2xl border border-pink-200/80 bg-white shadow-[0_12px_40px_-8px_rgba(236,72,153,0.22),0_4px_16px_-4px_rgba(0,0,0,0.06)] ring-1 ring-pink-100/50"
+          className="fixed bottom-[max(4.5rem,calc(env(safe-area-inset-bottom,0px)+4.5rem))] right-[max(1rem,env(safe-area-inset-right,0px))] z-[100] flex flex-col overflow-hidden rounded-2xl border border-pink-200/80 bg-white shadow-[0_12px_40px_-8px_rgba(236,72,153,0.22),0_4px_16px_-4px_rgba(0,0,0,0.06)] ring-1 ring-pink-100/50 sm:bottom-[4.5rem] sm:right-5"
           style={{
             width: panelSize.w,
             height: panelSize.h,
             minWidth: PANEL_MIN_W,
             minHeight: PANEL_MIN_H,
-            maxWidth: "min(calc(100vw - 2.5rem), 720px)",
-            maxHeight: "min(88vh, 800px)",
+            maxWidth: "min(calc(100vw - 2rem), 720px)",
+            maxHeight: "min(88dvh, 800px)",
           }}
           role="dialog"
           aria-modal="true"

@@ -70,12 +70,12 @@ export function ReorderCardsModal({ cards, setTitle, onClose, onSaveOrder }: Pro
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-3 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="reorder-title"
     >
-      <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
+      <div className="flex max-h-[90dvh] w-full min-w-0 max-w-lg flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
         <div className="border-b border-pink-100 px-5 py-4">
           <h2 id="reorder-title" className="text-lg font-semibold text-neutral-900">
             Reorder cards

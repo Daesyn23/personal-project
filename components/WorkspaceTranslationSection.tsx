@@ -334,7 +334,7 @@ export function WorkspaceTranslationSection() {
   );
 
   return (
-    <div className="min-w-0 max-w-full space-y-8">
+    <div className="w-full min-w-0 max-w-full space-y-8">
       <div className="relative overflow-hidden rounded-3xl border border-pink-100/80 bg-gradient-to-br from-white via-rose-50/40 to-fuchsia-50/30 p-6 shadow-xl shadow-pink-100/30 ring-1 ring-rose-100/50 sm:p-8">
         <div
           className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-gradient-to-br from-rose-200/50 to-fuchsia-200/40 blur-3xl"

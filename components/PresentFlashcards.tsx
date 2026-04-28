@@ -89,21 +89,15 @@ export function PresentFlashcards({
       aria-modal="true"
       aria-label="Presentation"
     >
-      <header className="flex items-center justify-between gap-3 border-b border-pink-100 px-4 py-3">
+      <header className="grid gap-3 border-b border-pink-100 px-3 py-3 [grid-template-columns:minmax(0,1fr)_auto] sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-4 sm:px-4">
         <button
           type="button"
           onClick={onClose}
-          className="rounded-lg px-3 py-1.5 text-sm font-medium text-pink-600 hover:bg-pink-50"
+          className="col-start-1 row-start-1 justify-self-start rounded-lg px-3 py-1.5 text-sm font-medium text-pink-600 hover:bg-pink-50"
         >
           Close
         </button>
-        <span className="text-center text-sm text-neutral-500">
-          <span className="block">
-            Card {index + 1} / {cards.length}
-          </span>
-          <span className="text-xs text-pink-600">{phaseLabel}</span>
-        </span>
-        <div className="flex gap-2">
+        <div className="col-start-2 row-start-1 flex shrink-0 justify-end gap-2 sm:col-start-3 sm:justify-self-end">
           <button
             type="button"
             onClick={back}
@@ -119,9 +113,15 @@ export function PresentFlashcards({
             {phase === "word" && hasDetailPhase(card) ? "Next slide" : "Next card"}
           </button>
         </div>
+        <span className="col-span-full row-start-2 min-w-0 text-center text-sm text-neutral-500 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:px-2">
+          <span className="block">
+            Card {index + 1} / {cards.length}
+          </span>
+          <span className="block text-xs text-pink-600">{phaseLabel}</span>
+        </span>
       </header>
 
-      <div className="flex flex-1 items-center justify-center overflow-auto p-6">
+      <div className="flex flex-1 items-center justify-center overflow-auto p-4 sm:p-6">
         <div
           key={`${card.id}-${phase}`}
           className="flashcard-enter w-full max-w-3xl"

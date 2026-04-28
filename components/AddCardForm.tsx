@@ -215,11 +215,11 @@ export function AddCardForm({ setId, onAdded, defaultExpanded = false }: Props) 
                 {error}
               </p>
             )}
-            <div className="mt-5 flex justify-end border-t border-pink-100/60 pt-4">
+            <div className="mt-5 flex flex-col gap-2 border-t border-pink-100/60 pt-4 sm:flex-row sm:justify-end">
               <button
                 type="submit"
                 disabled={busy}
-                className="rounded-xl bg-gradient-to-b from-pink-500 to-pink-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-pink-500/25 transition hover:from-pink-600 hover:to-pink-700 hover:shadow-lg disabled:opacity-50"
+                className="w-full rounded-xl bg-gradient-to-b from-pink-500 to-pink-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-pink-500/25 transition hover:from-pink-600 hover:to-pink-700 hover:shadow-lg disabled:opacity-50 sm:w-auto"
               >
                 {busy ? "Saving…" : "Add card"}
               </button>

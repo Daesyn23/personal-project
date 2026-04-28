@@ -157,10 +157,10 @@ export function WorkspaceJapaneseGrammarSection() {
   };
 
   return (
-    <div className="mx-auto min-w-0 max-w-3xl space-y-8">
+    <div className="mx-auto w-full min-w-0 max-w-3xl space-y-8">
       {/* Intro — pink accent, stacked report layout */}
-      <header className="border-l-4 border-pink-500 bg-gradient-to-r from-rose-50/80 via-stone-50/90 to-pink-50/50 px-5 py-6 sm:px-7 sm:py-7">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <header className="border-l-4 border-pink-500 bg-gradient-to-r from-rose-50/80 via-stone-50/90 to-pink-50/50 px-4 py-5 sm:px-7 sm:py-7">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <span className="inline-flex rounded border border-pink-200 bg-pink-50/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-pink-800">
               Proofreader

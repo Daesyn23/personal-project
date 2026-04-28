@@ -333,7 +333,7 @@ export function WorkspaceDocumentsSection() {
   };
 
   return (
-    <section className="space-y-6" aria-label="Documents and PDFs">
+    <section className="min-w-0 space-y-6" aria-label="Documents and PDFs">
       <div
         className="relative rounded-2xl border border-pink-100/90 bg-white/95 p-4 shadow-sm shadow-pink-100/35 sm:p-6"
         onDragEnter={onPanelDragEnter}
@@ -412,7 +412,10 @@ export function WorkspaceDocumentsSection() {
           </div>
         )}
 
-        <nav className="mt-5 flex flex-wrap items-center gap-1 text-sm" aria-label="Folder path">
+        <nav
+          className="mt-5 flex flex-nowrap items-center gap-1 overflow-x-auto pb-1 text-sm [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-x-visible sm:pb-0"
+          aria-label="Folder path"
+        >
           <button
             type="button"
             onClick={() => goCrumb(-1)}

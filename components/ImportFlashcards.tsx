@@ -191,12 +191,12 @@ export function ImportFlashcards({ onImported }: Props) {
 
       {modalOpen && (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-3 sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="import-title"
         >
-          <div className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
+          <div className="flex max-h-[90dvh] w-full min-w-0 max-w-5xl flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
             <div className="border-b border-pink-100 px-5 py-4">
               <h2 id="import-title" className="text-lg font-semibold text-neutral-900">
                 Import a set

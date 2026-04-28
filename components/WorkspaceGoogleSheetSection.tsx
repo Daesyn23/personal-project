@@ -1490,7 +1490,7 @@ export function WorkspaceGoogleSheetSection() {
     "font-semibold text-pink-700 underline decoration-pink-400 decoration-2 underline-offset-2 hover:text-pink-800";
 
   return (
-    <div className="min-w-0 max-w-full space-y-6">
+    <div className="w-full min-w-0 max-w-full space-y-6">
       {!linksReady ? (
         <div className="flex items-center justify-center gap-3 rounded-2xl border border-pink-100/80 bg-white/90 px-6 py-14 text-sm text-neutral-600 shadow-sm">
           <span
@@ -1610,7 +1610,7 @@ export function WorkspaceGoogleSheetSection() {
       ) : (
         <>
           <nav
-            className="flex max-w-full min-w-0 flex-wrap items-center gap-2 rounded-full border border-pink-100/90 bg-white/90 px-1 py-1 text-sm shadow-sm shadow-pink-100/50 backdrop-blur-sm"
+            className="flex max-w-full min-w-0 flex-nowrap items-center gap-2 overflow-x-auto rounded-full border border-pink-100/90 bg-white/90 px-1 py-1 text-sm shadow-sm shadow-pink-100/50 backdrop-blur-sm [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x sm:flex-wrap sm:overflow-x-visible [&::-webkit-scrollbar]:hidden"
             aria-label="Linked sheet breadcrumb"
           >
             <button

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { GeminiChatWidget } from "@/components/GeminiChatWidget";
 import { PinGate } from "@/components/PinGate";
@@ -21,6 +21,12 @@ export const metadata: Metadata = {
   authors: [{ name: "Aaron Nisperos", url: "mailto:aaronjoshuanisperos@gmail.com" }],
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -28,9 +34,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} relative min-h-screen antialiased`}>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} relative min-h-screen min-w-0 overflow-x-hidden antialiased`}
+      >
         <SeasonalBackground />
-        <div className="relative z-10">
+        <div className="relative z-10 min-w-0">
           <PinGate>
             <>
               {children}

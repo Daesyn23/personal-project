@@ -53,12 +53,12 @@ export function NewCollectionButton({ onCreated }: Props) {
 
       {open && (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-3 sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="new-collection-title"
         >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-pink-100">
+          <div className="w-full min-w-0 max-w-md rounded-2xl bg-white p-5 shadow-xl ring-1 ring-pink-100 sm:p-6">
             <h2 id="new-collection-title" className="text-lg font-semibold text-neutral-900">
               New collection
             </h2>
@@ -85,11 +85,11 @@ export function NewCollectionButton({ onCreated }: Props) {
                 {error}
               </p>
             )}
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={close}
-                className="rounded-lg px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-100"
+                className="w-full rounded-lg px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-100 sm:w-auto"
               >
                 Cancel
               </button>
@@ -97,7 +97,7 @@ export function NewCollectionButton({ onCreated }: Props) {
                 type="button"
                 disabled={busy || !name.trim()}
                 onClick={() => void submit()}
-                className="rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50"
+                className="w-full rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50 sm:w-auto"
               >
                 {busy ? "Creating…" : "Create"}
               </button>
