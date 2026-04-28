@@ -36,6 +36,19 @@ import { normalizeSheetsA1Range, spreadsheetIdLooksIncomplete } from "@/lib/shee
 /** Cell-only range; sheet tab comes from the dropdown (or explicit 'Name'! in the field). */
 const DEFAULT_RANGE = DEFAULT_SHEETS_CELL_RANGE;
 
+function googleSheetMessageImpliesReauth(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("invalid_grant") ||
+    m.includes("token has been expired") ||
+    m.includes("token has been revoked")
+  );
+}
+
+function startGoogleSheetsOAuth(): void {
+  window.location.href = "/api/google-sheets/auth";
+}
+
 /** After local edits (`dirty`), push to Google Sheets if nothing changes for this long. */
 const GOOGLE_SHEET_IDLE_SAVE_MS = 5000;
 
@@ -73,7 +86,7 @@ function clampWorksheetZoom(raw: number): number {
   return Math.min(WORKSHEET_ZOOM_MAX, Math.max(WORKSHEET_ZOOM_MIN, z));
 }
 
-/** Grade % = (x − y) / x × 100, rounded to nearest 0.01 (two decimal places). */
+/** Grade % rounded to nearest 0.01 (two decimal places). */
 function parseGradeCount(raw: string): number | null {
   const t = raw.trim().replace(/,/g, "");
   if (t === "") return null;
@@ -81,12 +94,23 @@ function parseGradeCount(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function computeGradePercentString(totalItems: number, mistakes: number): string | null {
-  if (!Number.isFinite(totalItems) || totalItems <= 0) return null;
-  if (!Number.isFinite(mistakes) || mistakes < 0 || mistakes > totalItems) return null;
-  const pct = ((totalItems - mistakes) / totalItems) * 100;
+function formatGradePercent(pct: number): string {
   const rounded = Math.round(pct * 100) / 100;
   return rounded.toFixed(2);
+}
+
+/** From total items x and mistakes y: (x − y) / x × 100. */
+function computeGradePercentFromMistakes(totalItems: number, mistakes: number): string | null {
+  if (!Number.isFinite(totalItems) || totalItems <= 0) return null;
+  if (!Number.isFinite(mistakes) || mistakes < 0 || mistakes > totalItems) return null;
+  return formatGradePercent(((totalItems - mistakes) / totalItems) * 100);
+}
+
+/** From total items x and correct count c: c / x × 100. */
+function computeGradePercentFromCorrect(totalItems: number, correct: number): string | null {
+  if (!Number.isFinite(totalItems) || totalItems <= 0) return null;
+  if (!Number.isFinite(correct) || correct < 0 || correct > totalItems) return null;
+  return formatGradePercent((correct / totalItems) * 100);
 }
 
 /** A1-style column label (0 → A, 25 → Z, 26 → AA). */
@@ -307,11 +331,15 @@ export function WorkspaceGoogleSheetSection() {
   const [sheetTabs, setSheetTabs] = useState<{ sheetId: number; title: string; index: number }[]>([]);
   const [tabsLoading, setTabsLoading] = useState(false);
   const [tabsError, setTabsError] = useState<string | null>(null);
+  /** Shown when Google returns invalid_grant (or similar); one-click OAuth fixes it without editing .env. */
+  const [suggestGoogleReauth, setSuggestGoogleReauth] = useState(false);
   const [selectedSheetId, setSelectedSheetId] = useState<number | null>(null);
 
   const [selectedCell, setSelectedCell] = useState<{ r: number; c: number } | null>(null);
   const [gradeTotalItems, setGradeTotalItems] = useState("");
-  const [gradeMistakes, setGradeMistakes] = useState("");
+  const [gradeSecondInput, setGradeSecondInput] = useState("");
+  /** Mistakes (y) vs raw correct count (c) for the second field. */
+  const [gradeCalcMode, setGradeCalcMode] = useState<"mistakes" | "correct">("mistakes");
   const [gradeCalcError, setGradeCalcError] = useState<string | null>(null);
 
   /** Last column index (0-based) included in horizontal sticky freeze; null = none. */
@@ -485,6 +513,23 @@ export function WorkspaceGoogleSheetSection() {
   }, [refreshStatus]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const u = new URL(window.location.href);
+    if (u.searchParams.get("google_sheets_connected") !== "1") return;
+    u.searchParams.delete("google_sheets_connected");
+    const qs = u.searchParams.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${u.pathname}${qs ? `?${qs}` : ""}${u.hash}`
+    );
+    setSuggestGoogleReauth(false);
+    setTabsError(null);
+    setError(null);
+    void refreshStatus();
+  }, [refreshStatus]);
+
+  useEffect(() => {
     if (!status?.canQuery || !spreadsheetId || idLooksIncomplete) {
       setSheetTabs([]);
       setSelectedSheetId(null);
@@ -504,12 +549,20 @@ export function WorkspaceGoogleSheetSection() {
           const data = (await r.json()) as {
             sheets?: { sheetId: number; title: string; index: number }[];
             error?: string;
+            needsGoogleReauth?: boolean;
           };
-          if (!r.ok) throw new Error(data.error || "Could not list sheet tabs");
+          if (!r.ok) {
+            setSuggestGoogleReauth(
+              Boolean(data.needsGoogleReauth) ||
+                googleSheetMessageImpliesReauth(data.error ?? "")
+            );
+            throw new Error(data.error || "Could not list sheet tabs");
+          }
           return data.sheets ?? [];
         })
         .then((tabs) => {
           if (cancelled) return;
+          setSuggestGoogleReauth(false);
           setSheetTabs(tabs);
           const urlGid = parseSheetGidFromUrl(spreadsheetInput);
           let saved: number | null = null;
@@ -572,6 +625,7 @@ export function WorkspaceGoogleSheetSection() {
           cells?: SheetCellPayload[][];
           merges?: SheetMergeCell[];
           error?: string;
+          needsGoogleReauth?: boolean;
           formatFallback?: boolean;
           formatError?: string;
         };
@@ -586,8 +640,13 @@ export function WorkspaceGoogleSheetSection() {
           );
         }
         if (!res.ok) {
+          setSuggestGoogleReauth(
+            Boolean(data.needsGoogleReauth) ||
+              googleSheetMessageImpliesReauth(data.error ?? "")
+          );
           throw new Error(data.error || "Could not load sheet");
         }
+        setSuggestGoogleReauth(false);
         const raw = data.values ?? [];
         const capped = raw.slice(0, MAX_ROWS).map((row) => row.slice(0, MAX_COLS));
         const grid = capped.length ? normalizeRows(capped) : emptyGrid(1, 6);
@@ -729,10 +788,12 @@ export function WorkspaceGoogleSheetSection() {
 
   const gradePreview = useMemo(() => {
     const x = parseGradeCount(gradeTotalItems);
-    const y = parseGradeCount(gradeMistakes);
-    if (x == null || y == null) return null;
-    return computeGradePercentString(x, y);
-  }, [gradeTotalItems, gradeMistakes]);
+    const second = parseGradeCount(gradeSecondInput);
+    if (x == null || second == null) return null;
+    return gradeCalcMode === "mistakes"
+      ? computeGradePercentFromMistakes(x, second)
+      : computeGradePercentFromCorrect(x, second);
+  }, [gradeTotalItems, gradeSecondInput, gradeCalcMode]);
 
   const handleSelectCell = useCallback((r: number, c: number) => {
     setSelectedCell({ r, c });
@@ -1026,14 +1087,25 @@ export function WorkspaceGoogleSheetSection() {
       return;
     }
     const x = parseGradeCount(gradeTotalItems);
-    const y = parseGradeCount(gradeMistakes);
-    if (x == null || y == null) {
-      setGradeCalcError("Enter total items (x) and mistakes (y) as numbers.");
+    const second = parseGradeCount(gradeSecondInput);
+    if (x == null || second == null) {
+      setGradeCalcError(
+        gradeCalcMode === "mistakes"
+          ? "Enter total items (x) and mistakes (y) as numbers."
+          : "Enter total items (x) and correct score (c) as numbers."
+      );
       return;
     }
-    const pct = computeGradePercentString(x, y);
+    const pct =
+      gradeCalcMode === "mistakes"
+        ? computeGradePercentFromMistakes(x, second)
+        : computeGradePercentFromCorrect(x, second);
     if (pct == null) {
-      setGradeCalcError("Need x > 0 and 0 ≤ y ≤ x.");
+      setGradeCalcError(
+        gradeCalcMode === "mistakes"
+          ? "Need x > 0 and 0 ≤ mistakes ≤ x."
+          : "Need x > 0 and 0 ≤ correct ≤ x."
+      );
       return;
     }
     setGradeCalcError(null);
@@ -1099,9 +1171,9 @@ export function WorkspaceGoogleSheetSection() {
         }),
       });
       const text = await res.text();
-      let data: { error?: string };
+      let data: { error?: string; needsGoogleReauth?: boolean };
       try {
-        data = JSON.parse(text) as { error?: string };
+        data = JSON.parse(text) as { error?: string; needsGoogleReauth?: boolean };
       } catch {
         throw new Error(
           text.trim().startsWith("<") || text.includes("Internal Server")
@@ -1109,7 +1181,14 @@ export function WorkspaceGoogleSheetSection() {
             : "Save failed: invalid response from server."
         );
       }
-      if (!res.ok) throw new Error(data.error || "Save failed");
+      if (!res.ok) {
+        setSuggestGoogleReauth(
+          Boolean(data.needsGoogleReauth) ||
+            googleSheetMessageImpliesReauth(data.error ?? "")
+        );
+        throw new Error(data.error || "Save failed");
+      }
+      setSuggestGoogleReauth(false);
       setDirty(false);
       setLastSynced(new Date());
       setLastSaveAt(new Date());
@@ -1405,6 +1484,10 @@ export function WorkspaceGoogleSheetSection() {
     "rounded-xl border border-pink-200/90 bg-white/90 px-3.5 py-2 text-xs font-semibold text-pink-900 shadow-sm shadow-pink-100/40 transition hover:border-pink-300 hover:bg-pink-50/90 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-40";
   const btnNeutral =
     "rounded-xl border border-neutral-200/90 bg-white px-3.5 py-2 text-xs font-semibold text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-50 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-40";
+  const btnReconnectOAuth =
+    "rounded-xl border border-pink-500/80 bg-gradient-to-r from-pink-600 to-rose-600 px-3.5 py-2 text-xs font-semibold text-white shadow-md shadow-pink-200/35 transition hover:from-pink-700 hover:to-rose-700 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-40";
+  const oauthLinkBtn =
+    "font-semibold text-pink-700 underline decoration-pink-400 decoration-2 underline-offset-2 hover:text-pink-800";
 
   return (
     <div className="min-w-0 max-w-full space-y-6">
@@ -1422,24 +1505,44 @@ export function WorkspaceGoogleSheetSection() {
             <p className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
               Add <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_ID</code> and{" "}
               <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_SECRET</code> to{" "}
-              <code className="rounded bg-amber-100 px-1">.env.local</code>, then open{" "}
-              <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
+              <code className="rounded bg-amber-100 px-1">.env.local</code>, then press{" "}
+              <button type="button" onClick={startGoogleSheetsOAuth} className={oauthLinkBtn}>
                 Connect Google
-              </a>{" "}
-              and paste <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> from the result page.
+              </button>{" "}
+              and approve access (the refresh token is saved on this machine automatically).
             </p>
           )}
 
           {status?.oauthClientConfigured && !status.refreshTokenSet && (
             <p className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
-              Open{" "}
-              <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
+              Press{" "}
+              <button type="button" onClick={startGoogleSheetsOAuth} className={oauthLinkBtn}>
                 Connect Google
-              </a>{" "}
-              in this browser, approve access, then add{" "}
-              <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> to{" "}
-              <code className="rounded bg-amber-100 px-1">.env.local</code> and restart the dev server.
+              </button>{" "}
+              and approve access in Google; you will return here with Sheets enabled. On hosts with a read-only disk,
+              set <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> in the environment instead.
             </p>
+          )}
+
+          {suggestGoogleReauth && status?.oauthClientConfigured && (
+            <div
+              className="rounded-xl border border-red-200/90 bg-red-50/95 px-4 py-3 text-sm text-red-950 shadow-sm"
+              role="alert"
+            >
+              <p className="font-semibold">Google access needs to be renewed.</p>
+              <p className="mt-1 text-red-900/90">
+                Press <strong>Reconnect Google</strong> and sign in again. No manual env editing is required on this
+                machine.
+              </p>
+              <button type="button" onClick={startGoogleSheetsOAuth} className={`${btnReconnectOAuth} mt-3`}>
+                Reconnect Google
+              </button>
+              <p className="mt-2 text-xs text-red-800/85">
+                If this keeps failing, remove an outdated{" "}
+                <code className="rounded bg-red-100/90 px-1">GOOGLE_REFRESH_TOKEN</code> from{" "}
+                <code className="rounded bg-red-100/90 px-1">.env.local</code> — that value overrides the saved file.
+              </p>
+            </div>
           )}
 
           <div className="relative overflow-hidden rounded-2xl border border-pink-200/60 bg-white/95 shadow-lg shadow-pink-200/25 ring-1 ring-pink-100/50">
@@ -1530,23 +1633,42 @@ export function WorkspaceGoogleSheetSection() {
               <p className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
                 Add <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_ID</code> and{" "}
                 <code className="rounded bg-amber-100 px-1">GOOGLE_CLIENT_SECRET</code> to{" "}
-                <code className="rounded bg-amber-100 px-1">.env.local</code>, then open{" "}
-                <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
+                <code className="rounded bg-amber-100 px-1">.env.local</code>, then press{" "}
+                <button type="button" onClick={startGoogleSheetsOAuth} className={oauthLinkBtn}>
                   Connect Google
-                </a>{" "}
-                and paste <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> from the result page.
+                </button>{" "}
+                and approve access (the refresh token is saved on this machine automatically).
               </p>
             )}
             {status?.oauthClientConfigured && !status.refreshTokenSet && (
               <p className="rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">
-                Open{" "}
-                <a className="font-semibold text-pink-700 underline" href="/api/google-sheets/auth">
+                Press{" "}
+                <button type="button" onClick={startGoogleSheetsOAuth} className={oauthLinkBtn}>
                   Connect Google
-                </a>{" "}
-                in this browser, approve access, then add{" "}
-                <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> to{" "}
-                <code className="rounded bg-amber-100 px-1">.env.local</code> and restart the dev server.
+                </button>{" "}
+                and approve access in Google; you will return here with Sheets enabled. On hosts with a read-only disk,
+                set <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> in the environment instead.
               </p>
+            )}
+            {suggestGoogleReauth && status?.oauthClientConfigured && (
+              <div
+                className="rounded-xl border border-red-200/90 bg-red-50/95 px-4 py-3 text-sm text-red-950 shadow-sm"
+                role="alert"
+              >
+                <p className="font-semibold">Google access needs to be renewed.</p>
+                <p className="mt-1 text-red-900/90">
+                  Press <strong>Reconnect Google</strong> and sign in again. No manual env editing is required on this
+                  machine.
+                </p>
+                <button type="button" onClick={startGoogleSheetsOAuth} className={`${btnReconnectOAuth} mt-3`}>
+                  Reconnect Google
+                </button>
+                <p className="mt-2 text-xs text-red-800/85">
+                  If this keeps failing, remove an outdated{" "}
+                  <code className="rounded bg-red-100/90 px-1">GOOGLE_REFRESH_TOKEN</code> from{" "}
+                  <code className="rounded bg-red-100/90 px-1">.env.local</code> — that value overrides the saved file.
+                </p>
+              </div>
             )}
             {error && (
               <p className="text-sm font-medium text-red-600" role="alert">
@@ -1728,12 +1850,17 @@ export function WorkspaceGoogleSheetSection() {
                         Open in Sheets
                       </a>
                     )}
-                    <a
-                      href="/api/google-sheets/auth"
-                      className={`${btnNeutral} inline-flex px-3 py-1.5 text-xs font-medium text-neutral-600`}
+                    <button
+                      type="button"
+                      onClick={startGoogleSheetsOAuth}
+                      className={
+                        suggestGoogleReauth
+                          ? `${btnReconnectOAuth} inline-flex px-3 py-1.5`
+                          : `${btnNeutral} inline-flex px-3 py-1.5 text-xs font-medium text-neutral-600`
+                      }
                     >
-                      Connect Google
-                    </a>
+                      {suggestGoogleReauth ? "Reconnect Google" : "Connect Google"}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2022,18 +2149,78 @@ export function WorkspaceGoogleSheetSection() {
             Grade calculator
           </h3>
           <p className="mt-1 max-w-3xl text-sm leading-relaxed text-neutral-600">
-            Percent score ={" "}
-            <code className="rounded bg-pink-50/90 px-1.5 py-0.5 font-mono text-[11px] text-pink-900 shadow-sm ring-1 ring-pink-100/80">
-              (x − y) / x × 100
-            </code>
-            , rounded to the nearest hundredth (two decimals).{" "}
-            <span className="font-medium text-neutral-800">x</span> = total items,{" "}
-            <span className="font-medium text-neutral-800">y</span> = mistakes. Select a cell in the{" "}
-            <strong className="font-semibold text-pink-800">Spreadsheet</strong> section above (click or focus), then
-            press <strong className="font-semibold text-pink-800">Save</strong> to insert the value.
+            {gradeCalcMode === "mistakes" ? (
+              <>
+                Percent score ={" "}
+                <code className="rounded bg-pink-50/90 px-1.5 py-0.5 font-mono text-[11px] text-pink-900 shadow-sm ring-1 ring-pink-100/80">
+                  (x − y) / x × 100
+                </code>
+                , rounded to the nearest hundredth (two decimals).{" "}
+                <span className="font-medium text-neutral-800">x</span> = total items,{" "}
+                <span className="font-medium text-neutral-800">y</span> = mistakes.
+              </>
+            ) : (
+              <>
+                Percent score ={" "}
+                <code className="rounded bg-pink-50/90 px-1.5 py-0.5 font-mono text-[11px] text-pink-900 shadow-sm ring-1 ring-pink-100/80">
+                  c / x × 100
+                </code>
+                , rounded to the nearest hundredth (two decimals).{" "}
+                <span className="font-medium text-neutral-800">x</span> = total items,{" "}
+                <span className="font-medium text-neutral-800">c</span> = total correct.
+              </>
+            )}{" "}
+            Select a cell in the <strong className="font-semibold text-pink-800">Spreadsheet</strong> section above
+            (click or focus), then press <strong className="font-semibold text-pink-800">Save</strong> to insert the
+            value.
           </p>
         </div>
         <div className="p-4 sm:p-6">
+          <fieldset className="mb-4 min-w-0">
+            <legend className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Score basis</legend>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <label
+                className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium shadow-sm transition ${
+                  gradeCalcMode === "mistakes"
+                    ? "border-pink-400 bg-pink-50 text-pink-950 ring-1 ring-pink-200"
+                    : "border-neutral-200 bg-white text-neutral-700 hover:border-pink-200 hover:bg-pink-50/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="grade-calc-mode"
+                  value="mistakes"
+                  checked={gradeCalcMode === "mistakes"}
+                  onChange={() => {
+                    setGradeCalcMode("mistakes");
+                    setGradeCalcError(null);
+                  }}
+                  className="h-4 w-4 accent-pink-600"
+                />
+                From mistakes
+              </label>
+              <label
+                className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium shadow-sm transition ${
+                  gradeCalcMode === "correct"
+                    ? "border-pink-400 bg-pink-50 text-pink-950 ring-1 ring-pink-200"
+                    : "border-neutral-200 bg-white text-neutral-700 hover:border-pink-200 hover:bg-pink-50/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="grade-calc-mode"
+                  value="correct"
+                  checked={gradeCalcMode === "correct"}
+                  onChange={() => {
+                    setGradeCalcMode("correct");
+                    setGradeCalcError(null);
+                  }}
+                  className="h-4 w-4 accent-pink-600"
+                />
+                From correct total
+              </label>
+            </div>
+          </fieldset>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-sm font-medium text-neutral-800">
               Total items (x)
@@ -2051,16 +2238,16 @@ export function WorkspaceGoogleSheetSection() {
               />
             </label>
             <label className="block text-sm font-medium text-neutral-800">
-              Total mistakes (y)
+              {gradeCalcMode === "mistakes" ? "Total mistakes (y)" : "Total correct (c)"}
               <input
                 type="text"
                 inputMode="decimal"
-                value={gradeMistakes}
+                value={gradeSecondInput}
                 onChange={(e) => {
-                  setGradeMistakes(e.target.value);
+                  setGradeSecondInput(e.target.value);
                   setGradeCalcError(null);
                 }}
-                placeholder="e.g. 3"
+                placeholder={gradeCalcMode === "mistakes" ? "e.g. 3" : "e.g. 47"}
                 spellCheck={false}
                 className="mt-1.5 w-full max-w-md rounded-xl border border-pink-100 bg-white px-3 py-2 font-mono text-sm text-neutral-900 shadow-inner outline-none ring-pink-200 focus:border-pink-300 focus:ring-2 focus:ring-pink-200"
               />

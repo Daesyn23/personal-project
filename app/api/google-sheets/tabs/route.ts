@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSheetsClient } from "@/lib/google-sheets-server";
+import { getSheetsClient, isGoogleOAuthInvalidGrantError } from "@/lib/google-sheets-server";
 import { spreadsheetIdLooksIncomplete } from "@/lib/sheets-a1";
 
 export const runtime = "nodejs";
@@ -35,8 +35,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ sheets: list });
   } catch (e) {
     console.error(e);
+    const message = e instanceof Error ? e.message : "Failed to list sheets";
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Failed to list sheets" },
+      {
+        error: message,
+        needsGoogleReauth: isGoogleOAuthInvalidGrantError(e),
+      },
       { status: 500 }
     );
   }

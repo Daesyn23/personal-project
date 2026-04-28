@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSheetsClient } from "@/lib/google-sheets-server";
+import { getSheetsClient, isGoogleOAuthInvalidGrantError } from "@/lib/google-sheets-server";
 import { fetchSpreadsheetRangeWithFormatting } from "@/lib/google-sheets-fetch-grid";
 import { finalizeParsedGrid } from "@/lib/google-sheets-grid-parse";
 import { localizeSheetMerges } from "@/lib/sheet-merge-localize";
@@ -110,7 +110,10 @@ export async function GET(req: NextRequest) {
   } catch (e) {
     console.error(e);
     const message = e instanceof Error ? e.message : "Failed to read sheet";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: message, needsGoogleReauth: isGoogleOAuthInvalidGrantError(e) },
+      { status: 500 }
+    );
   }
 }
 
@@ -174,6 +177,9 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     console.error(e);
     const message = e instanceof Error ? e.message : "Failed to update sheet";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: message, needsGoogleReauth: isGoogleOAuthInvalidGrantError(e) },
+      { status: 500 }
+    );
   }
 }

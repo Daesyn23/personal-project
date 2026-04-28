@@ -28,6 +28,9 @@ yarn-error.log*
 .env*.local
 .env
 
+# Google Sheets OAuth (written by /api/google-sheets/callback; do not commit)
+/data/google-sheets-refresh-token
+
 # vercel
 .vercel
 
