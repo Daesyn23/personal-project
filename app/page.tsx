@@ -13,6 +13,7 @@ import { ReorderCardsModal } from "@/components/ReorderCardsModal";
 import { WorkspaceDocumentsSection } from "@/components/WorkspaceDocumentsSection";
 import { WorkspaceGoogleSheetSection } from "@/components/WorkspaceGoogleSheetSection";
 import { WorkspaceTimerSection } from "@/components/WorkspaceTimerSection";
+import { WorkspaceJapaneseGrammarSection } from "@/components/WorkspaceJapaneseGrammarSection";
 import { WorkspaceTranslationSection } from "@/components/WorkspaceTranslationSection";
 import {
   deleteFlashcards,
@@ -34,7 +35,7 @@ function tileLabel(card: FlashcardRow): string {
   );
 }
 
-type WorkspaceArea = "documents" | "flashcards" | "googleSheet" | "timer" | "translate";
+type WorkspaceArea = "documents" | "flashcards" | "googleSheet" | "timer" | "translate" | "grammar";
 
 export default function HomePage() {
   const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>("flashcards");
@@ -76,7 +77,8 @@ export default function HomePage() {
       workspaceArea === "documents" ||
       workspaceArea === "googleSheet" ||
       workspaceArea === "timer" ||
-      workspaceArea === "translate"
+      workspaceArea === "translate" ||
+      workspaceArea === "grammar"
     ) {
       setPresentOpen(false);
     }
@@ -295,6 +297,17 @@ export default function HomePage() {
             >
               Translate
             </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceArea("grammar")}
+              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+                workspaceArea === "grammar"
+                  ? "border-pink-600 text-pink-700"
+                  : "border-transparent text-neutral-500 hover:text-pink-600"
+              }`}
+            >
+              Grammar
+            </button>
           </nav>
         </header>
 
@@ -306,6 +319,8 @@ export default function HomePage() {
           <WorkspaceTimerSection />
         ) : workspaceArea === "translate" ? (
           <WorkspaceTranslationSection />
+        ) : workspaceArea === "grammar" ? (
+          <WorkspaceJapaneseGrammarSection />
         ) : (
           <>
         {activeSetId && (

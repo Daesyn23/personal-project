@@ -21,7 +21,6 @@ type TranslateResponse = {
   japanese: string;
   reading: string | null;
   nuance: string | null;
-  model?: string;
   error?: string;
 };
 
@@ -117,9 +116,7 @@ export function WorkspaceTranslationSection() {
   const [includeReading, setIncludeReading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<Pick<TranslateResponse, "japanese" | "reading" | "nuance" | "model"> | null>(
-    null
-  );
+  const [result, setResult] = useState<Pick<TranslateResponse, "japanese" | "reading" | "nuance"> | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
   /** null = idle, otherwise which line is playing */
@@ -218,7 +215,6 @@ export function WorkspaceTranslationSection() {
         japanese: data.japanese,
         reading: data.reading,
         nuance: data.nuance,
-        model: data.model,
       });
       pushHistory({
         source: t,
@@ -322,7 +318,6 @@ export function WorkspaceTranslationSection() {
       japanese: h.japanese,
       reading: h.reading,
       nuance: null,
-      model: undefined,
     });
     setError(null);
     areaRef.current?.focus();
@@ -525,9 +520,6 @@ export function WorkspaceTranslationSection() {
                     <span className="font-semibold text-neutral-800">Note: </span>
                     {result.nuance}
                   </p>
-                )}
-                {result.model && (
-                  <p className="text-[10px] text-neutral-400">Model: {result.model}</p>
                 )}
                 <div className="mt-auto space-y-4 border-t border-pink-100/80 pt-6">
                   <div>
