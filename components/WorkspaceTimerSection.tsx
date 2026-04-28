@@ -31,10 +31,86 @@ function formatClock(totalSeconds: number): string {
   return `${String(mm).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
 }
 
-/** Wider typography in fullscreen (`05 : 00` or `1 : 30 : 00`). */
-function formatClockSpaced(totalSeconds: number, finished: boolean): string {
-  if (finished) return "00 : 00";
-  return formatClock(totalSeconds).replace(/:/g, " : ");
+/** Fullscreen clock as flex segments — avoids reflow into two lines when spaces would wrap. */
+function fullscreenColonSep() {
+  return (
+    <span className="shrink-0 px-0.5 tabular-nums sm:px-1" aria-hidden>
+      {"\u00a0:\u00a0"}
+    </span>
+  );
+}
+
+function FullscreenClockFace({ totalSeconds, finished }: { totalSeconds: number; finished: boolean }) {
+  if (finished) {
+    return (
+      <>
+        <span className="tabular-nums">00</span>
+        {fullscreenColonSep()}
+        <span className="tabular-nums">00</span>
+      </>
+    );
+  }
+  const raw = formatClock(totalSeconds);
+  const parts = raw.split(":");
+  if (parts.length === 3) {
+    return (
+      <>
+        <span className="tabular-nums">{parts[0]}</span>
+        {fullscreenColonSep()}
+        <span className="tabular-nums">{parts[1]}</span>
+        {fullscreenColonSep()}
+        <span className="tabular-nums">{parts[2]}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className="tabular-nums">{parts[0]}</span>
+      {fullscreenColonSep()}
+      <span className="tabular-nums">{parts[1]}</span>
+    </>
+  );
+}
+
+/** Non-fullscreen compact clock — same flex-nowrap guarantee for long h:mm:ss. */
+function compactColonSep() {
+  return (
+    <span className="shrink-0" aria-hidden>
+      :
+    </span>
+  );
+}
+
+function CompactClockFace({ totalSeconds, finished }: { totalSeconds: number; finished: boolean }) {
+  if (finished) {
+    return (
+      <>
+        <span className="tabular-nums">00</span>
+        {compactColonSep()}
+        <span className="tabular-nums">00</span>
+      </>
+    );
+  }
+  const raw = formatClock(totalSeconds);
+  const parts = raw.split(":");
+  if (parts.length === 3) {
+    return (
+      <>
+        <span className="tabular-nums">{parts[0]}</span>
+        {compactColonSep()}
+        <span className="tabular-nums">{parts[1]}</span>
+        {compactColonSep()}
+        <span className="tabular-nums">{parts[2]}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className="tabular-nums">{parts[0]}</span>
+      {compactColonSep()}
+      <span className="tabular-nums">{parts[1]}</span>
+    </>
+  );
 }
 
 const FINISH_ALARM_SECONDS = 5;
@@ -370,11 +446,11 @@ export function WorkspaceTimerSection() {
               </p>
             )}
             <div
-              className={`font-mono font-bold tabular-nums tracking-tight whitespace-nowrap leading-none ${
+              className={`flex w-full min-w-0 flex-nowrap items-baseline justify-center font-mono font-bold tabular-nums leading-none ${
                 fullscreen
                   ? clockHasHours
-                    ? "text-[clamp(1rem,6.2vmin,5rem)] tracking-wide"
-                    : "text-[min(14vw,6.5rem)] tracking-wide"
+                    ? "text-[clamp(1rem,5.5vmin,5rem)] tracking-wide"
+                    : "text-[clamp(1rem,min(14vw,12vmin),6.5rem)] tracking-wide"
                   : clockHasHours
                     ? "text-4xl sm:text-5xl"
                     : "text-5xl sm:text-6xl"
@@ -388,7 +464,11 @@ export function WorkspaceTimerSection() {
               aria-live="polite"
               aria-atomic="true"
             >
-              {fullscreen ? formatClockSpaced(remainingSeconds, finished) : finished ? "00:00" : formatClock(remainingSeconds)}
+              {fullscreen ? (
+                <FullscreenClockFace totalSeconds={remainingSeconds} finished={finished} />
+              ) : (
+                <CompactClockFace totalSeconds={remainingSeconds} finished={finished} />
+              )}
             </div>
             {finished && (
               <p className="mt-4 text-base font-semibold text-rose-700" role="status">
