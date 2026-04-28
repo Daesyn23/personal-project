@@ -13,6 +13,7 @@ import { ReorderCardsModal } from "@/components/ReorderCardsModal";
 import { WorkspaceDocumentsSection } from "@/components/WorkspaceDocumentsSection";
 import { WorkspaceGoogleSheetSection } from "@/components/WorkspaceGoogleSheetSection";
 import { WorkspaceTimerSection } from "@/components/WorkspaceTimerSection";
+import { WorkspaceTranslationSection } from "@/components/WorkspaceTranslationSection";
 import {
   deleteFlashcards,
   listCardSets,
@@ -33,7 +34,7 @@ function tileLabel(card: FlashcardRow): string {
   );
 }
 
-type WorkspaceArea = "documents" | "flashcards" | "googleSheet" | "timer";
+type WorkspaceArea = "documents" | "flashcards" | "googleSheet" | "timer" | "translate";
 
 export default function HomePage() {
   const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>("flashcards");
@@ -71,7 +72,12 @@ export default function HomePage() {
   }, [refresh]);
 
   useEffect(() => {
-    if (workspaceArea === "documents" || workspaceArea === "googleSheet" || workspaceArea === "timer") {
+    if (
+      workspaceArea === "documents" ||
+      workspaceArea === "googleSheet" ||
+      workspaceArea === "timer" ||
+      workspaceArea === "translate"
+    ) {
       setPresentOpen(false);
     }
   }, [workspaceArea]);
@@ -278,6 +284,17 @@ export default function HomePage() {
             >
               Timer
             </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceArea("translate")}
+              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+                workspaceArea === "translate"
+                  ? "border-pink-600 text-pink-700"
+                  : "border-transparent text-neutral-500 hover:text-pink-600"
+              }`}
+            >
+              Translate
+            </button>
           </nav>
         </header>
 
@@ -287,6 +304,8 @@ export default function HomePage() {
           <WorkspaceGoogleSheetSection />
         ) : workspaceArea === "timer" ? (
           <WorkspaceTimerSection />
+        ) : workspaceArea === "translate" ? (
+          <WorkspaceTranslationSection />
         ) : (
           <>
         {activeSetId && (
