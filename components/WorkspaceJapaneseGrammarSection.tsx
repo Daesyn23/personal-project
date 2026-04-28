@@ -25,6 +25,7 @@ type GrammarResult = {
   severity: "ok" | "minor" | "incorrect";
   explanation: string;
   correctedJapanese: string;
+  reading?: string | null;
   issues: GrammarIssue[];
 };
 
@@ -35,6 +36,7 @@ export function WorkspaceJapaneseGrammarSection() {
   const [text, setText] = useState("");
   const [context, setContext] = useState("");
   const [contextOpen, setContextOpen] = useState(false);
+  const [includeReading, setIncludeReading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GrammarResult | null>(null);
@@ -81,6 +83,7 @@ export function WorkspaceJapaneseGrammarSection() {
         body: JSON.stringify({
           text: t,
           context: context.trim() || undefined,
+          includeReading,
         }),
       });
       const data = (await res.json()) as GrammarResult & { error?: string };
@@ -92,6 +95,7 @@ export function WorkspaceJapaneseGrammarSection() {
         severity: data.severity,
         explanation: data.explanation,
         correctedJapanese: data.correctedJapanese,
+        reading: data.reading ?? null,
         issues: Array.isArray(data.issues) ? data.issues : [],
       });
     } catch (e) {
@@ -99,7 +103,7 @@ export function WorkspaceJapaneseGrammarSection() {
     } finally {
       setLoading(false);
     }
-  }, [text, context]);
+  }, [text, context, includeReading]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -241,6 +245,15 @@ export function WorkspaceJapaneseGrammarSection() {
               {charCount.toLocaleString()} / {MAX_INPUT.toLocaleString()}
             </span>
             <div className="flex flex-wrap gap-2">
+              <label className="inline-flex items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 shadow-sm transition hover:bg-stone-50">
+                <input
+                  type="checkbox"
+                  checked={includeReading}
+                  onChange={(e) => setIncludeReading(e.target.checked)}
+                  className="h-4 w-4 rounded border-stone-300 text-pink-600 focus:ring-pink-500"
+                />
+                Hiragana reading
+              </label>
               <button
                 type="button"
                 onClick={() => {
@@ -365,6 +378,14 @@ export function WorkspaceJapaneseGrammarSection() {
                 >
                   {result.correctedJapanese}
                 </p>
+                {includeReading && result.reading ? (
+                  <div className="mt-4 rounded-lg border border-pink-200 bg-pink-50/40 px-4 py-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-pink-800/80">Reading</p>
+                    <p className={`mt-1 whitespace-pre-wrap break-words text-base font-medium text-stone-900 ${jpFontClass}`}>
+                      {result.reading}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="mt-4">
                   <button type="button" className={btnGhost} onClick={() => void copyCorrected()}>
                     {copied ? "Copied" : "Copy corrected Japanese"}

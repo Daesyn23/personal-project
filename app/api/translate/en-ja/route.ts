@@ -23,10 +23,23 @@ Schema:
 
 Rules:
 - "japanese": natural, idiomatic Japanese. Match the user's requested register exactly.
-- "reading": If the user asks for readings, a full hiragana reading of the entire Japanese line (okuri optional). If not asked, null.
+- "reading": If the user asks for readings, a full hiragana reading of the entire Japanese line (include okurigana). If not asked, null.
 - "nuance": At most one short English sentence (≤220 chars) on register, nuance, or ambiguity; otherwise null.
 - Do not add furigana brackets inside "japanese" unless the source explicitly asks for ruby-style glosses.
 - If the input is empty or not translatable, set japanese to a brief polite Japanese apology and explain in nuance in English.`;
+
+const READING_SYSTEM_INSTRUCTION = `You convert Japanese text into a full hiragana reading line.
+You MUST reply with a single JSON object only. No markdown fences, no extra keys.
+
+Schema:
+{
+  "reading": string
+}
+
+Rules:
+- Output a hiragana-only reading for the ENTIRE input line.
+- Preserve punctuation and spacing (including newlines) as-is.
+- Do not include kanji. Do not include romaji.`;
 
 function stripJsonFence(raw: string): string {
   let t = raw.trim();
@@ -139,8 +152,26 @@ export async function POST(req: Request) {
       }
 
       const readingVal = (parsed as { reading?: unknown }).reading;
-      const reading =
-        typeof readingVal === "string" && readingVal.trim().length > 0 ? readingVal.trim() : null;
+      let reading = typeof readingVal === "string" && readingVal.trim().length > 0 ? readingVal.trim() : null;
+
+      // Fallback: some model outputs omit "reading" even when requested.
+      // If the user asked for it, derive the full-hiragana line from the Japanese output.
+      if (includeReading && !reading) {
+        try {
+          const readingModel = genAI.getGenerativeModel({
+            model: modelName,
+            systemInstruction: READING_SYSTEM_INSTRUCTION,
+          });
+          const readingPrompt = [`Japanese:\n${japanese}`].join("\n");
+          const readingResult = await readingModel.generateContent(readingPrompt);
+          const readingRaw = readingResult.response.text();
+          const readingParsed = JSON.parse(stripJsonFence(readingRaw)) as { reading?: unknown };
+          const r = typeof readingParsed.reading === "string" ? readingParsed.reading.trim() : "";
+          if (r) reading = r;
+        } catch {
+          // If reading fallback fails, keep it null (UI will just show kanji).
+        }
+      }
 
       const nuanceVal = (parsed as { nuance?: unknown }).nuance;
       const nuance =

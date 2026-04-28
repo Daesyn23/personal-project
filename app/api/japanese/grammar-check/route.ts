@@ -34,6 +34,19 @@ Rules:
 - If input is not Japanese or is empty, set acceptable false, severity "incorrect", explain in English, correctedJapanese a brief polite Japanese note, issues empty array.
 - Keep strings concise; explanation under 900 characters.`;
 
+const READING_SYSTEM_INSTRUCTION = `You convert Japanese text into a full hiragana reading line.
+You MUST reply with a single JSON object only. No markdown fences, no extra keys.
+
+Schema:
+{
+  "reading": string
+}
+
+Rules:
+- Output a hiragana-only reading for the ENTIRE input line.
+- Preserve punctuation and spacing (including newlines) as-is.
+- Do not include kanji. Do not include romaji.`;
+
 function stripJsonFence(raw: string): string {
   let t = raw.trim();
   const fence = /^```(?:json)?\s*([\s\S]*?)```$/im.exec(t);
@@ -107,6 +120,8 @@ export async function POST(req: Request) {
   const context =
     contextRaw.length > MAX_CONTEXT_CHARS ? contextRaw.slice(0, MAX_CONTEXT_CHARS) : contextRaw;
 
+  const includeReading = Boolean((body as { includeReading?: unknown }).includeReading);
+
   const userBlock = [
     "Check this Japanese for grammar and naturalness.",
     context ? `Context (may affect particles/register):\n${context}` : null,
@@ -158,11 +173,30 @@ export async function POST(req: Request) {
 
       const issues = normalizeIssues(o.issues);
 
+      let reading: string | null = null;
+      if (includeReading) {
+        try {
+          const readingModel = genAI.getGenerativeModel({
+            model: modelName,
+            systemInstruction: READING_SYSTEM_INSTRUCTION,
+          });
+          const readingPrompt = `Japanese:\n${correctedJapanese}`;
+          const readingResult = await readingModel.generateContent(readingPrompt);
+          const readingRaw = readingResult.response.text();
+          const readingParsed = JSON.parse(stripJsonFence(readingRaw)) as { reading?: unknown };
+          const r = typeof readingParsed.reading === "string" ? readingParsed.reading.trim() : "";
+          reading = r || null;
+        } catch {
+          reading = null;
+        }
+      }
+
       return NextResponse.json({
         acceptable,
         severity,
         explanation,
         correctedJapanese,
+        reading,
         issues,
         model: modelName,
       });
