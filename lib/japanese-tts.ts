@@ -37,7 +37,6 @@ function isChromiumChrome(): boolean {
 /** Cancel current speech and bump epoch so pending deferred speaks are dropped. */
 function beginNewUtterance(synth: SpeechSynthesis): number {
   utteranceEpoch++;
-  // Always clear the queue first — fixes Chrome “stuck” / ghost-pending states before the next speak().
   synth.cancel();
   prepareSpeechSynthesis(synth);
   return utteranceEpoch;
@@ -58,15 +57,6 @@ function speakAndResume(synth: SpeechSynthesis, u: SpeechSynthesisUtterance): vo
   }
 }
 
-/**
- * Chrome (especially on real HTTPS origins) only allows `speechSynthesis.speak()` inside the
- * same synchronous user-activation turn as the click. `queueMicrotask`, `requestAnimationFrame`,
- * or `setTimeout` between click and `speak()` often yields silence or `not-allowed` — while
- * `localhost` can appear to work anyway.
- *
- * We still call `getVoices()` here (side effect: some engines populate the list); then run
- * `speak` immediately. Lang-only utterances work even when the voice list is still empty.
- */
 function runSpeakInUserGestureTurn(synth: SpeechSynthesis, epoch: number, fn: () => void): void {
   void synth.getVoices();
   if (epoch !== utteranceEpoch) return;
@@ -91,16 +81,24 @@ export function getBestEnglishVoice(): SpeechSynthesisVoice | undefined {
   );
 }
 
+/** True when Chrome is unlikely to have a Japanese engine unless the OS installed one (common on Windows). */
+export function chromeLikelyMissingJapaneseVoice(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  if (!("speechSynthesis" in window) || !isChromiumChrome()) return false;
+  const ua = navigator.userAgent;
+  if (/\bMac OS X\b/.test(ua) || /\biPhone OS\b/.test(ua) || /\biPad\b/.test(ua)) return false;
+  void window.speechSynthesis.getVoices();
+  return !getBestJapaneseVoice();
+}
+
 export type SpeakCallbacks = {
   onEnd?: () => void;
   /** Browser error code when available, e.g. "not-allowed", "synthesis-failed". */
   onError?: (code?: string) => void;
 };
 
-/** Replacing or canceling an utterance fires these — not user-facing failures. */
 const BENIGN_SYNTH_ERRORS = new Set(["canceled", "interrupted"]);
 
-/** Picking a concrete voice can fail on some Safari / mobile builds; lang-only retry often works. */
 const VOICE_RETRY_ERRORS = new Set([
   "voice-unavailable",
   "language-unavailable",
@@ -131,7 +129,7 @@ export function speakJapaneseLine(text: string, kind: "japanese" | "reading", ca
   runSpeakInUserGestureTurn(synth, epoch, () => {
     if (epoch !== utteranceEpoch) return;
 
-    const speakOnce = (langOnly: boolean) => {
+    const speakOnce = (langOnly: boolean, shortJa: boolean) => {
       if (epoch !== utteranceEpoch) return;
       const voice = langOnly || isChromiumChrome() ? undefined : getBestJapaneseVoice();
       const u = new SpeechSynthesisUtterance(trimmed);
@@ -141,7 +139,7 @@ export function speakJapaneseLine(text: string, kind: "japanese" | "reading", ca
         u.lang = vl.startsWith("ja") && voice.lang ? voice.lang : "ja-JP";
         u.voice = voice;
       } else {
-        u.lang = "ja-JP";
+        u.lang = shortJa ? "ja" : "ja-JP";
       }
       u.rate = Math.min(1, kind === "reading" ? 0.88 : 0.9);
       u.pitch = 1;
@@ -151,7 +149,11 @@ export function speakJapaneseLine(text: string, kind: "japanese" | "reading", ca
         const code = e?.error ?? "speech-synthesis-error";
         if (BENIGN_SYNTH_ERRORS.has(code)) return;
         if (!langOnly && VOICE_RETRY_ERRORS.has(code)) {
-          speakOnce(true);
+          speakOnce(true, false);
+          return;
+        }
+        if (langOnly && !shortJa && VOICE_RETRY_ERRORS.has(code)) {
+          speakOnce(true, true);
           return;
         }
         callbacks.onError?.(code);
@@ -163,14 +165,18 @@ export function speakJapaneseLine(text: string, kind: "japanese" | "reading", ca
         speakAndResume(synth, u);
       } catch {
         if (!langOnly) {
-          speakOnce(true);
+          speakOnce(true, false);
+          return;
+        }
+        if (!shortJa) {
+          speakOnce(true, true);
           return;
         }
         callbacks.onError?.("speak-threw");
       }
     };
 
-    speakOnce(false);
+    speakOnce(false, false);
   });
 }
 

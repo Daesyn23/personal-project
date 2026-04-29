@@ -114,11 +114,43 @@ function ExampleRomajiLine({ text }: { text: string }) {
   );
 }
 
-const speakBtnClass =
-  "inline-flex min-h-[40px] items-center justify-center rounded-full border border-pink-200/90 bg-white px-4 text-xs font-semibold text-pink-800 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400";
+const iconBtnBase =
+  "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border shadow-sm transition focus-visible:outline-none focus-visible:ring-2";
 
-const stopSpeakBtnClass =
-  "inline-flex min-h-[40px] items-center justify-center rounded-full border border-rose-300/90 bg-rose-50 px-4 text-xs font-semibold text-rose-900 shadow-sm transition hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400";
+const iconBtnSpeak =
+  `${iconBtnBase} border-pink-200/90 bg-white text-pink-800 hover:border-pink-300 hover:bg-pink-50/90 focus-visible:ring-pink-400`;
+
+const iconBtnStop =
+  `${iconBtnBase} border-rose-300/90 bg-rose-50 text-rose-900 hover:bg-rose-100 focus-visible:ring-rose-400`;
+
+/** Speaker with sound waves (idle). */
+function IconSpeak({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 0 0 1.5 12c0 .898.121 1.768.35 2.595.341 1.24 1.518 1.905 2.659 1.905h1.93l4.5 4.5c.945.945 2.561.276 2.561-1.06V4.06ZM18.584 5.826a.75.75 0 0 1 1.06 0c3.808 3.807 3.808 9.98 0 13.788a.75.75 0 1 1-1.06-1.06 8.25 8.25 0 0 0 0-11.668.75.75 0 0 1 0-1.06Z" />
+      <path d="M15.53 8.47a.75.75 0 0 1 0 1.06 4.25 4.25 0 0 1 0 6.06.75.75 0 1 1-1.06-1.06 2.75 2.75 0 0 0 0-3.94.75.75 0 0 1 1.06-1.06Z" />
+    </svg>
+  );
+}
+
+/** Stop / end playback while speaking. */
+function IconStopSpeech({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path
+        fillRule="evenodd"
+        d="M4.5 7.5c0-.621.504-1.125 1.125-1.125h12.75c.621 0 1.125.504 1.125 1.125v9c0 .621-.504 1.125-1.125 1.125H5.625A1.125 1.125 0 0 1 4.5 16.5v-9Z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
 
 export function FlashcardSlide({ card, phase = "word", className = "" }: Props) {
   const jpLine = japaneseLine(card);
@@ -225,10 +257,11 @@ export function FlashcardSlide({ card, phase = "word", className = "" }: Props) 
             type="button"
             onPointerDown={speakPress.onPointerDown}
             onClick={speakPress.onClick}
-            className={speaking ? stopSpeakBtnClass : speakBtnClass}
+            className={speaking ? iconBtnStop : iconBtnSpeak}
             aria-label={speaking ? "Stop speech" : "Speak card"}
+            title={speaking ? "Stop" : "Listen"}
           >
-            {speaking ? "Stop" : "Speak"}
+            {speaking ? <IconStopSpeech className="h-5 w-5" /> : <IconSpeak className="h-5 w-5" />}
           </button>
           {ttsHint ? <p className="mt-1.5 text-[10px] leading-snug text-rose-700">{ttsHint}</p> : null}
         </div>

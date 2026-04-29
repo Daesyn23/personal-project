@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { cancelSpeechSynthesis, speakJapaneseLine } from "@/lib/japanese-tts";
+import { cancelSpeechSynthesis, chromeLikelyMissingJapaneseVoice, speakJapaneseLine } from "@/lib/japanese-tts";
 import { useSpeechActivationHandlers } from "@/lib/useSpeechActivationHandlers";
 
 const STORAGE_HISTORY = "workspace-en-ja-translation-history-v1";
@@ -605,9 +605,18 @@ export function WorkspaceTranslationSection() {
                         ) : null}
                       </div>
                       <p className="mt-3 text-xs leading-relaxed text-neutral-500">
-                        Speech uses your browser’s text-to-speech. For clearer audio, add a Japanese voice in your system
-                        or browser settings.
+                        Speech uses your browser’s text-to-speech. Safari on Mac often works immediately; Chrome usually
+                        uses whatever voices your operating system lists (Windows often has none for Japanese until you
+                        add them). Install Japanese under Settings → Time &amp; language → Language &amp; region, then add
+                        a Japanese text-to-speech voice under Speech or Narrator, restart Chrome, and try again. In
+                        Chrome, open the lock icon beside the URL → Site settings → Sound and set it to Allow.
                       </p>
+                      {chromeLikelyMissingJapaneseVoice() ? (
+                        <p className="mt-2 rounded-lg border border-amber-200/90 bg-amber-50/90 px-3 py-2 text-xs font-medium text-amber-950">
+                          Chrome did not list a Japanese voice. Install Japanese speech for your OS (steps above), then
+                          reload this page.
+                        </p>
+                      ) : null}
                     </div>
                   )}
                 </div>
