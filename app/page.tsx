@@ -55,6 +55,8 @@ export default function HomePage() {
   const [presentOpen, setPresentOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<FlashcardRow | null>(null);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  /** Bumps when opening bulk edit so the modal remounts with fresh rows; stays stable while editing. */
+  const [bulkEditInstanceKey, setBulkEditInstanceKey] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [loaded, setLoaded] = useState(false);
   const [cardsLoading, setCardsLoading] = useState(false);
@@ -420,7 +422,10 @@ export default function HomePage() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => setBulkEditOpen(true)}
+                    onClick={() => {
+                      setBulkEditInstanceKey((k) => k + 1);
+                      setBulkEditOpen(true);
+                    }}
                     className="rounded-lg border border-pink-200 bg-pink-50 px-3 py-1.5 text-xs font-semibold text-pink-800 transition hover:bg-pink-100"
                   >
                     Bulk edit
@@ -520,9 +525,19 @@ export default function HomePage() {
 
       {bulkEditOpen && selectedCount > 0 && (
         <BulkEditFlashcardsModal
-          key={[...selectedIds].sort().join("|")}
+          key={`${activeSetId ?? "set"}-${bulkEditInstanceKey}`}
           cards={cards.filter((c) => selectedIds.has(c.id))}
           onClose={() => setBulkEditOpen(false)}
+          onCardsRemoved={(ids) => {
+            setSelectedIds((prev) => {
+              const next = new Set(prev);
+              for (const id of ids) next.delete(id);
+              if (next.size === 0) setBulkEditOpen(false);
+              return next;
+            });
+            void refresh();
+            void reloadCardsForActiveSet();
+          }}
           onSaved={() => {
             void refresh();
             void reloadCardsForActiveSet();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { updateFlashcard } from "@/lib/flashcards-repo";
+import { deleteFlashcard, deleteFlashcards, updateFlashcard } from "@/lib/flashcards-repo";
 import type { FlashcardRow } from "@/lib/types";
 
 type RowDraft = {
@@ -28,19 +28,59 @@ function rowsFromCards(cards: FlashcardRow[]): RowDraft[] {
   }));
 }
 
+/** True when every editable cell is blank (trimmed). */
+function rowIsEmpty(row: RowDraft): boolean {
+  return !(
+    row.phonetic_reading.trim() ||
+    row.category_label.trim() ||
+    row.kana.trim() ||
+    row.definition.trim() ||
+    row.context_note.trim() ||
+    row.example_sentence.trim() ||
+    row.example_translation.trim()
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
 type Props = {
   cards: FlashcardRow[];
   onClose: () => void;
   onSaved: () => void;
+  /** After cards are deleted on the server (trash icon or save with fully empty rows). */
+  onCardsRemoved?: (ids: string[]) => void;
 };
 
 const cell =
   "w-full min-w-[6.5rem] rounded border border-neutral-200 bg-white px-2 py-1.5 text-xs text-neutral-900 shadow-sm outline-none focus:border-pink-400 focus:ring-1 focus:ring-pink-300";
 
+const iconDelete =
+  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-rose-200/90 text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:pointer-events-none disabled:opacity-40";
+
 /**
  * Spreadsheet-style bulk edit: one row per card, columns match the single-card editor fields.
  */
-export function BulkEditFlashcardsModal({ cards, onClose, onSaved }: Props) {
+export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemoved }: Props) {
   const [rows, setRows] = useState<RowDraft[]>(() => rowsFromCards(cards));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,13 +94,35 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved }: Props) {
     });
   };
 
+  const removeRowByIcon = async (index: number) => {
+    const id = rows[index]?.id;
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteFlashcard(id);
+      setRows((prev) => prev.filter((_, i) => i !== index));
+      onCardsRemoved?.([id]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete card");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const save = async () => {
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
+    const emptyRows = rows.filter(rowIsEmpty);
+    const nonempty = rows.filter((r) => !rowIsEmpty(r));
+
+    for (let i = 0; i < nonempty.length; i++) {
+      const row = nonempty[i];
       const def = row.definition.trim();
       const ka = row.kana.trim();
       if (!def && !ka) {
-        setError(`Row ${i + 1}: enter English gloss and/or kana.`);
+        const displayIndex = rows.indexOf(row) + 1;
+        setError(
+          `Row ${displayIndex}: enter English gloss and/or kana, clear other fields to delete the card, or use the trash icon.`
+        );
         return;
       }
     }
@@ -68,24 +130,30 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await Promise.all(
-        rows.map((row) => {
-          const def = row.definition.trim();
-          const ka = row.kana.trim();
-          return updateFlashcard(row.id, {
-            phonetic_reading: row.phonetic_reading.trim() || null,
-            category_label: row.category_label.trim() || null,
-            definition: def || null,
-            context_note: row.context_note.trim() || null,
-            kana: ka || null,
-            kanji: null,
-            example_sentence: row.example_sentence.trim() || null,
-            example_translation: row.example_translation.trim() || null,
-          });
-        })
-      );
+      const emptyIds = emptyRows.map((r) => r.id);
+      if (emptyIds.length) {
+        await deleteFlashcards(emptyIds);
+        onCardsRemoved?.(emptyIds);
+      }
+      if (nonempty.length) {
+        await Promise.all(
+          nonempty.map((row) => {
+            const def = row.definition.trim();
+            const ka = row.kana.trim();
+            return updateFlashcard(row.id, {
+              phonetic_reading: row.phonetic_reading.trim() || null,
+              category_label: row.category_label.trim() || null,
+              definition: def || null,
+              context_note: row.context_note.trim() || null,
+              kana: ka || null,
+              kanji: null,
+              example_sentence: row.example_sentence.trim() || null,
+              example_translation: row.example_translation.trim() || null,
+            });
+          })
+        );
+      }
       onSaved();
-      onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save");
     } finally {
@@ -108,12 +176,13 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved }: Props) {
             Bulk edit ({n} card{n === 1 ? "" : "s"})
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
-            Edit cells like a spreadsheet. Each row is one card. English gloss and/or kana is required on every row.
+            Each row is one card. English gloss and/or kana is required unless you clear the whole row (save will delete
+            it) or use the trash icon to remove a card immediately.
           </p>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[56rem] border-collapse text-left text-xs">
+          <table className="w-full min-w-[58rem] border-collapse text-left text-xs">
             <thead className="sticky top-0 z-20 border-b border-pink-100 bg-gradient-to-b from-white to-pink-50/80 shadow-sm">
               <tr>
                 <th
@@ -140,8 +209,14 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved }: Props) {
                 <th scope="col" className="min-w-[8rem] whitespace-nowrap px-2 py-2 font-semibold text-neutral-600">
                   Example
                 </th>
-                <th scope="col" className="min-w-[8rem] whitespace-nowrap px-2 py-2 pr-3 font-semibold text-neutral-600">
+                <th scope="col" className="min-w-[8rem] whitespace-nowrap px-2 py-2 font-semibold text-neutral-600">
                   Ex. translation
+                </th>
+                <th
+                  scope="col"
+                  className="sticky right-0 z-30 w-12 border-l border-pink-100 bg-gradient-to-b from-white to-pink-50/80 px-1 py-2 pr-3 text-center font-semibold text-neutral-600"
+                >
+                  <span className="sr-only">Delete</span>
                 </th>
               </tr>
             </thead>
@@ -204,13 +279,25 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved }: Props) {
                       onChange={(e) => updateCell(i, "example_sentence", e.target.value)}
                     />
                   </td>
-                  <td className="px-1 py-1 pr-2 align-top">
+                  <td className="px-1 py-1 align-top">
                     <textarea
                       rows={2}
                       className={`${cell} resize-y bg-pink-50/40`}
                       value={row.example_translation}
                       onChange={(e) => updateCell(i, "example_translation", e.target.value)}
                     />
+                  </td>
+                  <td className="sticky right-0 z-10 w-12 border-l border-pink-100/80 bg-white px-1 py-1 align-middle even:bg-[#fffafc]">
+                    <button
+                      type="button"
+                      className={iconDelete}
+                      aria-label="Delete card"
+                      title="Delete card"
+                      disabled={busy}
+                      onClick={() => void removeRowByIcon(i)}
+                    >
+                      <IconTrash />
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -236,7 +323,7 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved }: Props) {
           </button>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || n === 0}
             onClick={() => void save()}
             className="rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50"
           >
