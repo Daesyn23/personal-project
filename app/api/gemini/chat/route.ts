@@ -1,10 +1,8 @@
 import { GoogleGenerativeAI, type Content } from "@google/generative-ai";
 import { NextResponse } from "next/server";
-import {
-  geminiModelAttemptOrder,
-  resolveGeminiModelId,
-  shouldAttemptNextGeminiModel,
-} from "@/lib/gemini-model";
+import { generateTextGeminiThenGroq } from "@/lib/gemini-with-groq-fallback";
+import { geminiModelAttemptOrder, resolveGeminiModelId } from "@/lib/gemini-model";
+import { isGroqConfigured } from "@/lib/groq-openai";
 
 export const runtime = "nodejs";
 
@@ -35,10 +33,13 @@ function normalizeMessages(raw: unknown): IncomingMessage[] | null {
 }
 
 export async function POST(req: Request) {
-  const key = process.env.GEMINI_API_KEY?.trim();
-  if (!key) {
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!geminiKey && !isGroqConfigured()) {
     return NextResponse.json(
-      { error: "Gemini is not configured. Add GEMINI_API_KEY to .env.local and restart the server." },
+      {
+        error:
+          "LLM is not configured. Add GEMINI_API_KEY and/or GROQ_API_KEY to .env.local and restart the server.",
+      },
       { status: 503 }
     );
   }
@@ -78,40 +79,40 @@ export async function POST(req: Request) {
 
   const primaryModel = resolveGeminiModelId(process.env.GEMINI_MODEL);
   const modelAttempts = geminiModelAttemptOrder(primaryModel);
-  const genAI = new GoogleGenerativeAI(key);
+  const genAI = geminiKey ? new GoogleGenerativeAI(geminiKey) : null;
 
-  for (let i = 0; i < modelAttempts.length; i++) {
-    const modelName = modelAttempts[i]!;
-    try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        ...(systemInstruction ? { systemInstruction } : {}),
-      });
-      const chat = model.startChat({ history });
-      const result = await chat.sendMessage(last.content);
-      const text = result.response.text();
-      if (!text?.trim()) {
-        const emptyErr = new Error("Empty model response.");
-        if (i < modelAttempts.length - 1 && shouldAttemptNextGeminiModel(emptyErr)) {
-          continue;
-        }
-        return NextResponse.json({ error: "Empty model response." }, { status: 502 });
-      }
-      return NextResponse.json({ text, model: modelName });
-    } catch (e) {
-      const canTryNext = i < modelAttempts.length - 1 && shouldAttemptNextGeminiModel(e);
-      if (canTryNext) {
-        console.warn(`[gemini/chat] model ${modelName} failed, trying fallback:`, e);
-        continue;
-      }
-      let msg = e instanceof Error ? e.message : "Gemini request failed.";
-      if (msg.includes("404") && msg.includes("not found")) {
-        msg += ` Tried: ${modelAttempts.join(", ")}. Set GEMINI_MODEL to a current id in .env.local or check API access.`;
-      }
-      console.error("[gemini/chat]", e);
-      return NextResponse.json({ error: msg }, { status: 502 });
+  const groqChatMsgs = messages.map((m) => ({
+    role: m.role as "system" | "user" | "assistant",
+    content: m.content,
+  }));
+
+  try {
+    const { text, model } = await generateTextGeminiThenGroq({
+      logLabel: "gemini/chat",
+      geminiApiKey: geminiKey,
+      modelAttempts,
+      runGemini: async (modelName) => {
+        if (!genAI) throw new Error("Gemini not configured");
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          ...(systemInstruction ? { systemInstruction } : {}),
+        });
+        const chat = model.startChat({ history });
+        const result = await chat.sendMessage(last.content);
+        return result.response.text();
+      },
+      groq: { messages: groqChatMsgs, jsonMode: false },
+    });
+    if (!text?.trim()) {
+      return NextResponse.json({ error: "Empty model response." }, { status: 502 });
     }
+    return NextResponse.json({ text, model });
+  } catch (e) {
+    let msg = e instanceof Error ? e.message : "LLM request failed.";
+    if (msg.includes("404") && msg.includes("not found")) {
+      msg += ` Tried Gemini: ${modelAttempts.join(", ")}. Set GEMINI_MODEL to a current id in .env.local or check API access.`;
+    }
+    console.error("[gemini/chat]", e);
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
-
-  return NextResponse.json({ error: "No Gemini model candidates." }, { status: 500 });
 }

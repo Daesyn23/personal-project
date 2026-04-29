@@ -20,6 +20,8 @@ export type FlashcardRow = {
   context_note: string | null;
   example_sentence: string | null;
   example_translation: string | null;
+  /** Teacher prep (cultural notes, etc.); not shown on flashcard slides */
+  teacher_research: string | null;
   position: number;
   created_at?: string;
 };

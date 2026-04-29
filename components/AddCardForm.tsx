@@ -23,6 +23,7 @@ function emptyDraft(): FlashcardDraft {
     context_note: null,
     example_sentence: null,
     example_translation: null,
+    teacher_research: null,
     position: 0,
   };
 }

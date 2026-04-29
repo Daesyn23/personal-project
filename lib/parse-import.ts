@@ -10,7 +10,8 @@ type StringFieldKey =
   | "definition"
   | "context_note"
   | "example_sentence"
-  | "example_translation";
+  | "example_translation"
+  | "teacher_research";
 
 function setDraftString(draft: FlashcardDraft, key: StringFieldKey, value: string) {
   draft[key] = value;
@@ -48,6 +49,9 @@ const FIELD_ALIASES: Record<string, StringFieldKey> = {
   example_en: "example_translation",
   example_translation: "example_translation",
   translation: "example_translation",
+  teacher_research: "teacher_research",
+  research: "teacher_research",
+  lesson_research: "teacher_research",
 };
 
 function normalizeHeader(h: string): string {
@@ -140,6 +144,7 @@ function rowToDraft(
     context_note: null,
     example_sentence: null,
     example_translation: null,
+    teacher_research: null,
     position,
   };
 
@@ -173,6 +178,7 @@ function rowByColumnOrder(cells: string[], position: number): FlashcardDraft {
     native_script: v(6),
     category_label: v(7),
     context_note: v(8),
+    teacher_research: null,
     position,
   };
 }
@@ -280,6 +286,7 @@ function emptyDraft(position: number): FlashcardDraft {
     context_note: null,
     example_sentence: null,
     example_translation: null,
+    teacher_research: null,
     position,
   };
 }

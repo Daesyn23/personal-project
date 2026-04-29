@@ -27,6 +27,7 @@ function readLocal(): LocalStore {
             ...c,
             set_id: sid,
             position: i,
+            teacher_research: (c as FlashcardRow).teacher_research ?? null,
           }));
           const store: LocalStore = {
             sets: [{ id: sid, name, created_at: new Date().toISOString() }],
@@ -160,6 +161,31 @@ export async function updateCardSetName(setId: string, name: string): Promise<vo
   }
 }
 
+/** Deletes the set and all its cards (Supabase: ON DELETE CASCADE on flashcards.set_id). */
+export async function deleteCardSet(setId: string): Promise<void> {
+  const supabase = getSupabaseBrowserClient();
+  if (supabase) {
+    const { error } = await supabase.from("card_sets").delete().eq("id", setId);
+    if (error) {
+      console.error(error);
+      const store = readLocal();
+      store.sets = store.sets.filter((s) => s.id !== setId);
+      store.cards = store.cards.filter((c) => c.set_id !== setId);
+      writeLocal(store);
+      throw error;
+    }
+    return;
+  }
+  const store = readLocal();
+  store.sets = store.sets.filter((s) => s.id !== setId);
+  store.cards = store.cards.filter((c) => c.set_id !== setId);
+  writeLocal(store);
+}
+
+function withTeacherResearch(c: FlashcardRow): FlashcardRow {
+  return { ...c, teacher_research: c.teacher_research ?? null };
+}
+
 export async function listFlashcardsInSet(setId: string): Promise<FlashcardRow[]> {
   const supabase = getSupabaseBrowserClient();
   if (supabase) {
@@ -170,13 +196,17 @@ export async function listFlashcardsInSet(setId: string): Promise<FlashcardRow[]
       .order("position", { ascending: true });
     if (error) {
       console.error(error);
-      return readLocal().cards.filter((c) => c.set_id === setId).sort((a, b) => a.position - b.position);
+      return readLocal()
+        .cards.filter((c) => c.set_id === setId)
+        .sort((a, b) => a.position - b.position)
+        .map(withTeacherResearch);
     }
-    return (data ?? []) as FlashcardRow[];
+    return ((data ?? []) as FlashcardRow[]).map(withTeacherResearch);
   }
   return readLocal()
     .cards.filter((c) => c.set_id === setId)
-    .sort((a, b) => a.position - b.position);
+    .sort((a, b) => a.position - b.position)
+    .map(withTeacherResearch);
 }
 
 /** Insert new cards into a set (positions 0..n-1 within the set). */
@@ -194,6 +224,7 @@ export async function addCardsToSet(setId: string, cards: FlashcardDraft[]): Pro
     context_note: c.context_note,
     example_sentence: c.example_sentence,
     example_translation: c.example_translation,
+    teacher_research: c.teacher_research ?? null,
     position: i,
     created_at: new Date().toISOString(),
   }));
@@ -244,6 +275,7 @@ export async function appendCardsToSet(setId: string, cards: FlashcardDraft[]): 
     context_note: c.context_note,
     example_sentence: c.example_sentence,
     example_translation: c.example_translation,
+    teacher_research: c.teacher_research ?? null,
     position: base + i,
     created_at: new Date().toISOString(),
   }));

@@ -1,10 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
-import {
-  geminiModelAttemptOrder,
-  resolveGeminiModelId,
-  shouldAttemptNextGeminiModel,
-} from "@/lib/gemini-model";
+import { generateTextGeminiThenGroq } from "@/lib/gemini-with-groq-fallback";
+import { geminiModelAttemptOrder, resolveGeminiModelId } from "@/lib/gemini-model";
+import { isGroqConfigured } from "@/lib/groq-openai";
 
 export const runtime = "nodejs";
 
@@ -54,12 +52,12 @@ function parseStyle(raw: unknown): "neutral" | "polite" | "casual" {
 }
 
 export async function POST(req: Request) {
-  const key = process.env.GEMINI_API_KEY?.trim();
-  if (!key) {
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!geminiKey && !isGroqConfigured()) {
     return NextResponse.json(
       {
         error:
-          "Translation uses the same key as chat. Add GEMINI_API_KEY to .env.local and restart the dev server.",
+          "Translation needs an LLM key. Add GEMINI_API_KEY and/or GROQ_API_KEY to .env.local and restart the dev server.",
       },
       { status: 503 }
     );
@@ -115,88 +113,107 @@ export async function POST(req: Request) {
     .filter(Boolean)
     .join("\n");
 
-  const genAI = new GoogleGenerativeAI(key);
+  const genAI = geminiKey ? new GoogleGenerativeAI(geminiKey) : null;
   const primaryModel = resolveGeminiModelId(process.env.GEMINI_MODEL);
   const modelAttempts = geminiModelAttemptOrder(primaryModel);
 
-  for (let i = 0; i < modelAttempts.length; i++) {
-    const modelName = modelAttempts[i]!;
-    try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: SYSTEM_INSTRUCTION,
-      });
-      const result = await model.generateContent(userBlock);
-      const rawText = result.response.text();
-      if (!rawText?.trim()) {
-        throw new Error("Empty model response.");
-      }
+  try {
+    const { text: rawText, model: usedModel } = await generateTextGeminiThenGroq({
+      logLabel: "translate/en-ja",
+      geminiApiKey: geminiKey,
+      modelAttempts,
+      runGemini: async (modelName) => {
+        if (!genAI) throw new Error("Gemini not configured");
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction: SYSTEM_INSTRUCTION,
+        });
+        const result = await model.generateContent(userBlock);
+        return result.response.text();
+      },
+      groq: {
+        messages: [
+          { role: "system", content: SYSTEM_INSTRUCTION },
+          { role: "user", content: userBlock },
+        ],
+        jsonMode: true,
+      },
+    });
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(stripJsonFence(rawText));
-      } catch {
-        throw new Error("Model did not return valid JSON.");
-      }
-
-      if (!parsed || typeof parsed !== "object") {
-        throw new Error("Invalid JSON shape from model.");
-      }
-
-      const japanese =
-        typeof (parsed as { japanese?: unknown }).japanese === "string"
-          ? (parsed as { japanese: string }).japanese.trim()
-          : "";
-      if (!japanese) {
-        throw new Error("Translation was empty.");
-      }
-
-      const readingVal = (parsed as { reading?: unknown }).reading;
-      let reading = typeof readingVal === "string" && readingVal.trim().length > 0 ? readingVal.trim() : null;
-
-      // Fallback: some model outputs omit "reading" even when requested.
-      // If the user asked for it, derive the full-hiragana line from the Japanese output.
-      if (includeReading && !reading) {
-        try {
-          const readingModel = genAI.getGenerativeModel({
-            model: modelName,
-            systemInstruction: READING_SYSTEM_INSTRUCTION,
-          });
-          const readingPrompt = [`Japanese:\n${japanese}`].join("\n");
-          const readingResult = await readingModel.generateContent(readingPrompt);
-          const readingRaw = readingResult.response.text();
-          const readingParsed = JSON.parse(stripJsonFence(readingRaw)) as { reading?: unknown };
-          const r = typeof readingParsed.reading === "string" ? readingParsed.reading.trim() : "";
-          if (r) reading = r;
-        } catch {
-          // If reading fallback fails, keep it null (UI will just show kanji).
-        }
-      }
-
-      const nuanceVal = (parsed as { nuance?: unknown }).nuance;
-      const nuance =
-        typeof nuanceVal === "string" && nuanceVal.trim().length > 0 ? nuanceVal.trim().slice(0, 280) : null;
-
-      return NextResponse.json({
-        japanese,
-        reading: includeReading ? reading : null,
-        nuance,
-        model: modelName,
-      });
-    } catch (e) {
-      const canTryNext = i < modelAttempts.length - 1 && shouldAttemptNextGeminiModel(e);
-      if (canTryNext) {
-        console.warn(`[translate/en-ja] model ${modelName} failed, trying next:`, e);
-        continue;
-      }
-      let msg = e instanceof Error ? e.message : "Translation request failed.";
-      if (msg.includes("404") && msg.includes("not found")) {
-        msg += ` Tried: ${modelAttempts.join(", ")}.`;
-      }
-      console.error("[translate/en-ja]", e);
-      return NextResponse.json({ error: msg }, { status: 502 });
+    if (!rawText?.trim()) {
+      throw new Error("Empty model response.");
     }
-  }
 
-  return NextResponse.json({ error: "No Gemini model candidates." }, { status: 500 });
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripJsonFence(rawText));
+    } catch {
+      throw new Error("Model did not return valid JSON.");
+    }
+
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Invalid JSON shape from model.");
+    }
+
+    const japanese =
+      typeof (parsed as { japanese?: unknown }).japanese === "string"
+        ? (parsed as { japanese: string }).japanese.trim()
+        : "";
+    if (!japanese) {
+      throw new Error("Translation was empty.");
+    }
+
+    const readingVal = (parsed as { reading?: unknown }).reading;
+    let reading = typeof readingVal === "string" && readingVal.trim().length > 0 ? readingVal.trim() : null;
+
+    if (includeReading && !reading) {
+      try {
+        const readingPrompt = `Japanese:\n${japanese}`;
+        const { text: readingRaw } = await generateTextGeminiThenGroq({
+          logLabel: "translate/en-ja/reading",
+          geminiApiKey: geminiKey,
+          modelAttempts,
+          runGemini: async (modelName) => {
+            if (!genAI) throw new Error("Gemini not configured");
+            const readingModel = genAI.getGenerativeModel({
+              model: modelName,
+              systemInstruction: READING_SYSTEM_INSTRUCTION,
+            });
+            const readingResult = await readingModel.generateContent(readingPrompt);
+            return readingResult.response.text();
+          },
+          groq: {
+            messages: [
+              { role: "system", content: READING_SYSTEM_INSTRUCTION },
+              { role: "user", content: readingPrompt },
+            ],
+            jsonMode: true,
+          },
+        });
+        const readingParsed = JSON.parse(stripJsonFence(readingRaw)) as { reading?: unknown };
+        const r = typeof readingParsed.reading === "string" ? readingParsed.reading.trim() : "";
+        if (r) reading = r;
+      } catch {
+        // If reading fallback fails, keep it null (UI will just show kanji).
+      }
+    }
+
+    const nuanceVal = (parsed as { nuance?: unknown }).nuance;
+    const nuance =
+      typeof nuanceVal === "string" && nuanceVal.trim().length > 0 ? nuanceVal.trim().slice(0, 280) : null;
+
+    return NextResponse.json({
+      japanese,
+      reading: includeReading ? reading : null,
+      nuance,
+      model: usedModel,
+    });
+  } catch (e) {
+    let msg = e instanceof Error ? e.message : "Translation request failed.";
+    if (msg.includes("404") && msg.includes("not found")) {
+      msg += ` Tried Gemini: ${modelAttempts.join(", ")}.`;
+    }
+    console.error("[translate/en-ja]", e);
+    return NextResponse.json({ error: msg }, { status: 502 });
+  }
 }

@@ -19,6 +19,7 @@ export function EditFlashcardModal({ card, onClose, onSaved, onDeleted }: Props)
   const [kana, setKana] = useState("");
   const [exampleSentence, setExampleSentence] = useState("");
   const [exampleTranslation, setExampleTranslation] = useState("");
+  const [teacherResearch, setTeacherResearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,6 +32,7 @@ export function EditFlashcardModal({ card, onClose, onSaved, onDeleted }: Props)
     setKana(card.kana ?? "");
     setExampleSentence(card.example_sentence ?? "");
     setExampleTranslation(card.example_translation ?? "");
+    setTeacherResearch(card.teacher_research ?? "");
     setError(null);
   }, [card]);
 
@@ -55,6 +57,7 @@ export function EditFlashcardModal({ card, onClose, onSaved, onDeleted }: Props)
         kanji: null,
         example_sentence: exampleSentence.trim() || null,
         example_translation: exampleTranslation.trim() || null,
+        teacher_research: teacherResearch.trim() || null,
       });
       onSaved();
       onClose();
@@ -168,6 +171,17 @@ export function EditFlashcardModal({ card, onClose, onSaved, onDeleted }: Props)
                 rows={2}
                 value={exampleTranslation}
                 onChange={(e) => setExampleTranslation(e.target.value)}
+              />
+            </label>
+            <label className="block text-xs font-medium text-violet-800">
+              Teacher research (not shown on slides)
+              <textarea
+                className="mt-1 w-full rounded-lg border border-violet-200/80 bg-violet-50/40 px-3 py-2 text-sm leading-relaxed"
+                rows={4}
+                value={teacherResearch}
+                onChange={(e) => setTeacherResearch(e.target.value)}
+                placeholder="Cultural notes, stories, or teaching hooks for your prep only"
+                spellCheck={true}
               />
             </label>
           </div>

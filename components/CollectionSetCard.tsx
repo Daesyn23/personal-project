@@ -6,7 +6,16 @@ type Props = {
   collection: CardSetRow;
   onOpen: () => void;
   onRename: () => void;
+  onDelete: () => void;
 };
+
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+    </svg>
+  );
+}
 
 function PencilIcon({ className }: { className?: string }) {
   return (
@@ -48,7 +57,7 @@ function DeckStackDecoration({ className }: { className?: string }) {
   );
 }
 
-export function CollectionSetCard({ collection, onOpen, onRename }: Props) {
+export function CollectionSetCard({ collection, onOpen, onRename, onDelete }: Props) {
   const count = collection.card_count ?? 0;
   const accent = accentIndex(collection.id);
   const glow = ACCENT_GLOWS[accent];
@@ -87,19 +96,34 @@ export function CollectionSetCard({ collection, onOpen, onRename }: Props) {
             </h3>
             <p className="mt-1.5 text-sm text-neutral-500">Tap to open this set</p>
           </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onRename();
-            }}
-            className="shrink-0 rounded-lg p-2 text-pink-500/90 transition hover:bg-pink-50 hover:text-pink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
-            title="Rename collection"
-            aria-label={`Rename collection ${collection.name}`}
-          >
-            <PencilIcon className="h-5 w-5" />
-          </button>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onRename();
+              }}
+              className="rounded-lg p-2 text-pink-500/90 transition hover:bg-pink-50 hover:text-pink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
+              title="Rename collection"
+              aria-label={`Rename collection ${collection.name}`}
+            >
+              <PencilIcon className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete();
+              }}
+              className="rounded-lg p-2 text-rose-500/90 transition hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+              title="Delete collection"
+              aria-label={`Delete collection ${collection.name}`}
+            >
+              <TrashIcon className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-pink-100/80 pt-4">

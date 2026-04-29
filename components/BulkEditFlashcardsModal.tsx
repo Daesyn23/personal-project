@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { deleteFlashcard, deleteFlashcards, updateFlashcard } from "@/lib/flashcards-repo";
 import type { FlashcardRow } from "@/lib/types";
 
@@ -13,6 +13,16 @@ type RowDraft = {
   context_note: string;
   example_sentence: string;
   example_translation: string;
+  teacher_research: string;
+};
+
+type EnrichResultRow = {
+  id: string;
+  phonetic_reading: string | null;
+  category_label: string | null;
+  example_sentence: string | null;
+  example_translation: string | null;
+  teacher_research: string | null;
 };
 
 function rowsFromCards(cards: FlashcardRow[]): RowDraft[] {
@@ -25,6 +35,7 @@ function rowsFromCards(cards: FlashcardRow[]): RowDraft[] {
     context_note: c.context_note ?? "",
     example_sentence: c.example_sentence ?? "",
     example_translation: c.example_translation ?? "",
+    teacher_research: c.teacher_research ?? "",
   }));
 }
 
@@ -37,8 +48,40 @@ function rowIsEmpty(row: RowDraft): boolean {
     row.definition.trim() ||
     row.context_note.trim() ||
     row.example_sentence.trim() ||
-    row.example_translation.trim()
+    row.example_translation.trim() ||
+    row.teacher_research.trim()
   );
+}
+
+/** Row has kana + English and at least one autofill target field empty. */
+function rowWantsEnrichment(row: RowDraft): boolean {
+  const ka = row.kana.trim();
+  const def = row.definition.trim();
+  if (!ka || !def) return false;
+  return (
+    !row.phonetic_reading.trim() ||
+    !row.category_label.trim() ||
+    !row.example_sentence.trim() ||
+    !row.example_translation.trim() ||
+    !row.teacher_research.trim()
+  );
+}
+
+function pickFill(existing: string, incoming: string | null | undefined): string {
+  if (existing.trim()) return existing;
+  const t = (incoming ?? "").trim();
+  return t;
+}
+
+function mergeEnrichment(row: RowDraft, ai: EnrichResultRow): RowDraft {
+  return {
+    ...row,
+    phonetic_reading: pickFill(row.phonetic_reading, ai.phonetic_reading),
+    category_label: pickFill(row.category_label, ai.category_label),
+    example_sentence: pickFill(row.example_sentence, ai.example_sentence),
+    example_translation: pickFill(row.example_translation, ai.example_translation),
+    teacher_research: pickFill(row.teacher_research, ai.teacher_research),
+  };
 }
 
 function IconTrash() {
@@ -77,6 +120,9 @@ const cell =
 const iconDelete =
   "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-rose-200/90 text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:pointer-events-none disabled:opacity-40";
 
+const btnSecondary =
+  "inline-flex min-h-[36px] items-center justify-center rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-800 shadow-sm transition hover:bg-pink-50 disabled:pointer-events-none disabled:opacity-45";
+
 /**
  * Spreadsheet-style bulk edit: one row per card, columns match the single-card editor fields.
  */
@@ -84,6 +130,39 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
   const [rows, setRows] = useState<RowDraft[]>(() => rowsFromCards(cards));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [geminiReady, setGeminiReady] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/gemini/status");
+        const data = (await res.json()) as { configured?: boolean };
+        if (!cancelled) setGeminiReady(Boolean(data.configured));
+      } catch {
+        if (!cancelled) setGeminiReady(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const canAutofill = useMemo(
+    () => rows.some(rowWantsEnrichment) && geminiReady === true,
+    [rows, geminiReady]
+  );
+
+  const autofillDisabledReason = useMemo(() => {
+    if (geminiReady === false)
+      return "Add GEMINI_API_KEY and/or GROQ_API_KEY to .env.local to use AI autofill.";
+    if (geminiReady === null) return "Checking AI configuration…";
+    if (rows.length === 0) return "";
+    if (!rows.some(rowWantsEnrichment)) {
+      return "All target fields are already filled (romaji, group, example, translation, teacher research).";
+    }
+    return "";
+  }, [rows, geminiReady]);
 
   const updateCell = (index: number, field: keyof Omit<RowDraft, "id">, value: string) => {
     setRows((prev) => {
@@ -93,6 +172,47 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
       return next;
     });
   };
+
+  const runAutofill = useCallback(async () => {
+    const toSend = rows.filter(rowWantsEnrichment);
+    if (toSend.length === 0 || geminiReady !== true) return;
+
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/flashcards/enrich-lesson", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cards: toSend.map((r) => ({
+            id: r.id,
+            kana: r.kana.trim(),
+            definition: r.definition.trim(),
+          })),
+        }),
+      });
+      const data = (await res.json()) as { results?: EnrichResultRow[]; error?: string };
+      if (!res.ok) {
+        throw new Error(data.error || "Autofill failed.");
+      }
+      const list = data.results;
+      if (!Array.isArray(list)) {
+        throw new Error("Invalid response from server.");
+      }
+      const byId = new Map(list.map((r) => [r.id, r] as const));
+      setRows((prev) =>
+        prev.map((row) => {
+          const ai = byId.get(row.id);
+          if (!ai) return row;
+          return mergeEnrichment(row, ai);
+        })
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Autofill failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [rows, geminiReady]);
 
   const removeRowByIcon = async (index: number) => {
     const id = rows[index]?.id;
@@ -149,6 +269,7 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
               kanji: null,
               example_sentence: row.example_sentence.trim() || null,
               example_translation: row.example_translation.trim() || null,
+              teacher_research: row.teacher_research.trim() || null,
             });
           })
         );
@@ -177,12 +298,41 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
             Each row is one card. English gloss and/or kana is required unless you clear the whole row (save will delete
-            it) or use the trash icon to remove a card immediately.
+            it) or use the trash icon to remove a card immediately.{" "}
+            <strong className="font-semibold text-neutral-700">Teacher research</strong> is prep only and never appears
+            on presentation slides.
           </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className={btnSecondary}
+              disabled={busy || !canAutofill}
+              title={!canAutofill ? autofillDisabledReason : undefined}
+              onClick={() => void runAutofill()}
+            >
+              {busy ? "Working…" : "Autofill empty fields (AI)"}
+            </button>
+            {geminiReady === false && (
+              <span className="text-xs text-amber-800">
+                Add <code className="rounded bg-amber-100 px-1">GEMINI_API_KEY</code> or{" "}
+                <code className="rounded bg-amber-100 px-1">GROQ_API_KEY</code> to{" "}
+                <code className="rounded bg-amber-100 px-1">.env.local</code> for AI.
+              </span>
+            )}
+            {!busy && canAutofill && (
+              <span className="text-xs text-neutral-500">
+                Fills only empty romaji, group, example, translation, and teacher research. AI may be inaccurate —
+                verify before class.
+              </span>
+            )}
+            {!busy && !canAutofill && autofillDisabledReason && geminiReady !== false && (
+              <span className="text-xs text-neutral-500">{autofillDisabledReason}</span>
+            )}
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[58rem] border-collapse text-left text-xs">
+          <table className="w-full min-w-[76rem] border-collapse text-left text-xs">
             <thead className="sticky top-0 z-20 border-b border-pink-100 bg-gradient-to-b from-white to-pink-50/80 shadow-sm">
               <tr>
                 <th
@@ -211,6 +361,9 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
                 </th>
                 <th scope="col" className="min-w-[8rem] whitespace-nowrap px-2 py-2 font-semibold text-neutral-600">
                   Ex. translation
+                </th>
+                <th scope="col" className="min-w-[14rem] px-2 py-2 font-semibold text-neutral-600">
+                  Teacher research <span className="font-normal text-neutral-400">(not on slides)</span>
                 </th>
                 <th
                   scope="col"
@@ -285,6 +438,16 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
                       className={`${cell} resize-y bg-pink-50/40`}
                       value={row.example_translation}
                       onChange={(e) => updateCell(i, "example_translation", e.target.value)}
+                    />
+                  </td>
+                  <td className="min-w-[14rem] px-1 py-1 align-top">
+                    <textarea
+                      rows={3}
+                      spellCheck={true}
+                      placeholder="Cultural notes, stories, teaching hooks — not shown to students"
+                      className={`${cell} min-h-[4.5rem] resize-y border-violet-100 bg-violet-50/30`}
+                      value={row.teacher_research}
+                      onChange={(e) => updateCell(i, "teacher_research", e.target.value)}
                     />
                   </td>
                   <td className="sticky right-0 z-10 w-12 border-l border-pink-100/80 bg-white px-1 py-1 align-middle even:bg-[#fffafc]">

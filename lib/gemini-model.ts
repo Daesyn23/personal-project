@@ -68,3 +68,56 @@ export function shouldAttemptNextGeminiModel(error: unknown): boolean {
     msg.includes("is not found")
   );
 }
+
+function geminiErrorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Parses "Please retry in 54.33s" from GoogleGenerativeAI / Generative Language API errors. */
+export function parseRetryDelayMsFromGeminiError(error: unknown): number | null {
+  const msg = geminiErrorText(error);
+  const m = /retry in ([\d.]+)\s*s/i.exec(msg);
+  if (!m) return null;
+  const sec = Number.parseFloat(m[1]!);
+  if (!Number.isFinite(sec) || sec < 0) return null;
+  return Math.round(sec * 1000);
+}
+
+export function isGemini429OrQuotaError(error: unknown): boolean {
+  const msg = geminiErrorText(error).toLowerCase();
+  return (
+    msg.includes("429") ||
+    msg.includes("too many requests") ||
+    msg.includes("quota") ||
+    msg.includes("resource_exhausted")
+  );
+}
+
+/**
+ * Free-tier Gemini (AI Studio API key) uses the same Flash / Flash-Lite model names as paid usage;
+ * limits are RPM, RPD, and tokens — not a different "free model id". Callers can retry once after
+ * RetryInfo to recover from per-minute spikes (still subject to daily caps).
+ */
+export async function withGemini429QuotaRetry<T>(
+  run: () => Promise<T>,
+  options?: { maxDelayMs?: number }
+): Promise<T> {
+  const maxDelayMs = options?.maxDelayMs ?? 90_000;
+  try {
+    return await run();
+  } catch (first) {
+    if (!isGemini429OrQuotaError(first)) throw first;
+    const delay = parseRetryDelayMsFromGeminiError(first);
+    const ms = delay == null ? 2000 : Math.min(Math.max(delay, 500), maxDelayMs);
+    await new Promise((r) => setTimeout(r, ms));
+    return await run();
+  }
+}
+
+/** Appended to API error strings so users know 429 is billing/limits, not missing "free models". */
+export function appendGeminiFreeTierQuotaHint(message: string): string {
+  const m = message.trim();
+  if (!m) return m;
+  if (/ai\.google\.dev\/gemini-api\/docs\/rate-limits/i.test(m)) return m;
+  return `${m}\n\nFree tier: Gemini Flash and Flash-Lite are already the standard low-cost models; 429 means per-minute or daily request/token limits for your API key (see https://ai.google.dev/gemini-api/docs/rate-limits ). Wait for the reset, try GEMINI_MODEL=gemini-2.5-flash-lite to reduce tokens, enable pay-as-you-go billing on the same Google Cloud / AI Studio project for higher limits, or use a separate API key/project.`;
+}

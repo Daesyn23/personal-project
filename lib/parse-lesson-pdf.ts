@@ -32,6 +32,7 @@ function emptyDraft(position: number): FlashcardDraft {
     context_note: null,
     example_sentence: null,
     example_translation: null,
+    teacher_research: null,
     position,
   };
 }
@@ -100,6 +101,7 @@ function parseLineByTokens(line: string): Omit<FlashcardDraft, "position"> | nul
     context_note: null,
     example_sentence: null,
     example_translation: null,
+    teacher_research: null,
   };
 }
 
@@ -125,6 +127,7 @@ function splitLessonLineStructured(line: string): Omit<FlashcardDraft, "position
         context_note: null,
         example_sentence: null,
         example_translation: null,
+        teacher_research: null,
       };
     }
   }
@@ -147,6 +150,7 @@ function splitLessonLineStructured(line: string): Omit<FlashcardDraft, "position
         context_note: null,
         example_sentence: null,
         example_translation: null,
+        teacher_research: null,
       };
     }
   }

@@ -14,8 +14,10 @@ import { WorkspaceDocumentsSection } from "@/components/WorkspaceDocumentsSectio
 import { WorkspaceGoogleSheetSection } from "@/components/WorkspaceGoogleSheetSection";
 import { WorkspaceTimerSection } from "@/components/WorkspaceTimerSection";
 import { WorkspaceJapaneseGrammarSection } from "@/components/WorkspaceJapaneseGrammarSection";
+import { WorkspaceLessonPlanSection } from "@/components/WorkspaceLessonPlanSection";
 import { WorkspaceTranslationSection } from "@/components/WorkspaceTranslationSection";
 import {
+  deleteCardSet,
   deleteFlashcards,
   listCardSets,
   listFlashcardsInSet,
@@ -35,7 +37,14 @@ function tileLabel(card: FlashcardRow): string {
   );
 }
 
-type WorkspaceArea = "documents" | "flashcards" | "googleSheet" | "timer" | "translate" | "grammar";
+type WorkspaceArea =
+  | "documents"
+  | "flashcards"
+  | "googleSheet"
+  | "timer"
+  | "translate"
+  | "grammar"
+  | "lessonPlan";
 
 const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
   { id: "documents", label: "Documents" },
@@ -44,6 +53,7 @@ const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
   { id: "timer", label: "Timer" },
   { id: "translate", label: "Translate" },
   { id: "grammar", label: "Grammar" },
+  { id: "lessonPlan", label: "Lesson plan" },
 ];
 
 export default function HomePage() {
@@ -89,7 +99,8 @@ export default function HomePage() {
       workspaceArea === "googleSheet" ||
       workspaceArea === "timer" ||
       workspaceArea === "translate" ||
-      workspaceArea === "grammar"
+      workspaceArea === "grammar" ||
+      workspaceArea === "lessonPlan"
     ) {
       setPresentOpen(false);
     }
@@ -190,6 +201,31 @@ export default function HomePage() {
     }
   };
 
+  const deleteCollection = async (set: CardSetRow) => {
+    const cardPart =
+      activeSetId === set.id
+        ? `${cards.length} card${cards.length === 1 ? "" : "s"}`
+        : typeof set.card_count === "number"
+          ? `${set.card_count} card${set.card_count === 1 ? "" : "s"}`
+          : "all cards in it";
+    const msg = `Delete "${set.name}" and ${cardPart}? This cannot be undone.`;
+    if (!window.confirm(msg)) return;
+    try {
+      await deleteCardSet(set.id);
+      void refresh();
+      setRenamingCollection((r) => (r?.id === set.id ? null : r));
+      if (activeSetId === set.id) {
+        setActiveSetId(null);
+        setBulkEditOpen(false);
+        setEditingCard(null);
+        setPresentOpen(false);
+        setReorderModalOpen(false);
+      }
+    } catch {
+      window.alert("Could not delete the collection.");
+    }
+  };
+
   const applyCardOrder = useCallback(
     async (nextOrder: FlashcardRow[]) => {
       if (!activeSetId || nextOrder.length === 0) return;
@@ -285,6 +321,8 @@ export default function HomePage() {
           <WorkspaceTranslationSection />
         ) : workspaceArea === "grammar" ? (
           <WorkspaceJapaneseGrammarSection />
+        ) : workspaceArea === "lessonPlan" ? (
+          <WorkspaceLessonPlanSection activeSetId={activeSetId} setTitle={activeSetName ?? null} />
         ) : (
           <>
         {activeSetId && (
@@ -320,6 +358,24 @@ export default function HomePage() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const row = sets.find((x) => x.id === activeSetId);
+                    if (row) void deleteCollection(row);
+                  }}
+                  className="shrink-0 rounded-full p-1.5 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                  title="Delete collection"
+                  aria-label="Delete collection"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"
                     />
                   </svg>
                 </button>
@@ -383,6 +439,7 @@ export default function HomePage() {
                     collection={s}
                     onOpen={() => setActiveSetId(s.id)}
                     onRename={() => setRenamingCollection(s)}
+                    onDelete={() => void deleteCollection(s)}
                   />
                 </li>
               ))}

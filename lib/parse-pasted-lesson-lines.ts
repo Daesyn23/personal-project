@@ -13,6 +13,7 @@ function emptyDraft(position: number): FlashcardDraft {
     context_note: null,
     example_sentence: null,
     example_translation: null,
+    teacher_research: null,
     position,
   };
 }

@@ -404,7 +404,10 @@ export function GeminiChatWidget() {
 
           {configured === false && (
             <p className="border-b border-amber-200/80 bg-amber-50/95 px-3 py-2 text-[11px] leading-snug text-amber-950">
-              Add <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">GEMINI_API_KEY</code>{" "}
+              Add{" "}
+              <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">GEMINI_API_KEY</code>{" "}
+              or{" "}
+              <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">GROQ_API_KEY</code>{" "}
               to <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">.env.local</code>, then
               restart <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">npm run dev</code>.
             </p>
