@@ -1,30 +1,79 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { cancelSpeechSynthesis, chromeLikelyMissingJapaneseVoice, speakJapaneseLine } from "@/lib/japanese-tts";
+import {
+  cancelSpeechSynthesis,
+  chromeLikelyMissingJapaneseVoice,
+  speakEnglishLine,
+  speakJapaneseLine,
+} from "@/lib/japanese-tts";
 import { useSpeechActivationHandlers } from "@/lib/useSpeechActivationHandlers";
 
 const STORAGE_HISTORY = "workspace-en-ja-translation-history-v1";
+const STORAGE_DIRECTION = "workspace-translation-direction-v1";
 const MAX_HISTORY = 24;
 const MAX_SOURCE = 4000;
 
 type Tone = "neutral" | "polite" | "casual";
+type TranslateDirection = "en-ja" | "ja-en";
 
 type HistoryRow = {
   id: string;
   at: number;
+  direction: TranslateDirection;
   source: string;
-  japanese: string;
+  /** en-ja: Japanese output; ja-en: English output */
+  translation: string;
   reading: string | null;
   tone: Tone;
 };
 
-type TranslateResponse = {
+type TranslateEnJaResponse = {
   japanese: string;
   reading: string | null;
   nuance: string | null;
   error?: string;
 };
+
+type TranslateJaEnResponse = {
+  english: string;
+  nuance: string | null;
+  error?: string;
+};
+
+type TranslateResultEnJa = {
+  direction: "en-ja";
+  japanese: string;
+  reading: string | null;
+  nuance: string | null;
+};
+
+type TranslateResultJaEn = {
+  direction: "ja-en";
+  english: string;
+  nuance: string | null;
+};
+
+type TranslateResult = TranslateResultEnJa | TranslateResultJaEn;
+
+function loadDirection(): TranslateDirection {
+  if (typeof window === "undefined") return "en-ja";
+  try {
+    const raw = localStorage.getItem(STORAGE_DIRECTION);
+    if (raw === "ja-en" || raw === "en-ja") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "en-ja";
+}
+
+function saveDirection(d: TranslateDirection) {
+  try {
+    localStorage.setItem(STORAGE_DIRECTION, d);
+  } catch {
+    /* quota */
+  }
+}
 
 function loadHistory(): HistoryRow[] {
   if (typeof window === "undefined") return [];
@@ -39,14 +88,33 @@ function loadHistory(): HistoryRow[] {
       const id = (row as { id?: unknown }).id;
       const at = (row as { at?: unknown }).at;
       const source = (row as { source?: unknown }).source;
-      const japanese = (row as { japanese?: unknown }).japanese;
+      const translationRaw = (row as { translation?: unknown }).translation;
+      const japaneseLegacy = (row as { japanese?: unknown }).japanese;
       const reading = (row as { reading?: unknown }).reading;
       const tone = (row as { tone?: unknown }).tone;
+      const directionRaw = (row as { direction?: unknown }).direction;
       if (typeof id !== "string" || typeof at !== "number") continue;
-      if (typeof source !== "string" || typeof japanese !== "string") continue;
+      if (typeof source !== "string") continue;
       if (tone !== "neutral" && tone !== "polite" && tone !== "casual") continue;
+      const translation =
+        typeof translationRaw === "string"
+          ? translationRaw
+          : typeof japaneseLegacy === "string"
+            ? japaneseLegacy
+            : "";
+      if (!translation) continue;
+      const direction: TranslateDirection =
+        directionRaw === "ja-en" || directionRaw === "en-ja" ? directionRaw : "en-ja";
       const r = reading === null || typeof reading === "string" ? reading : null;
-      out.push({ id, at, source, japanese, reading: r, tone });
+      out.push({
+        id,
+        at,
+        direction,
+        source,
+        translation,
+        reading: direction === "ja-en" ? null : r,
+        tone,
+      });
     }
     return out.slice(0, MAX_HISTORY);
   } catch {
@@ -99,15 +167,16 @@ export function WorkspaceTranslationSection() {
   const [source, setSource] = useState("");
   const [context, setContext] = useState("");
   const [contextOpen, setContextOpen] = useState(false);
+  const [direction, setDirectionState] = useState<TranslateDirection>(() => loadDirection());
   const [tone, setTone] = useState<Tone>("neutral");
   const [includeReading, setIncludeReading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<Pick<TranslateResponse, "japanese" | "reading" | "nuance"> | null>(null);
+  const [result, setResult] = useState<TranslateResult | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
   /** null = idle, otherwise which line is playing */
-  const [speaking, setSpeaking] = useState<"japanese" | "reading" | null>(null);
+  const [speaking, setSpeaking] = useState<"japanese" | "reading" | "english" | null>(null);
   const [ttsSupported, setTtsSupported] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -145,6 +214,16 @@ export function WorkspaceTranslationSection() {
     };
   }, []);
 
+  /** User switches EN↔JA in the header — clears the current result. */
+  const pickDirection = useCallback((d: TranslateDirection) => {
+    setDirectionState(d);
+    saveDirection(d);
+    cancelSpeechSynthesis();
+    setSpeaking(null);
+    setResult(null);
+    setError(null);
+  }, []);
+
   const charCount = source.length;
   const overLimit = charCount > MAX_SOURCE;
 
@@ -152,13 +231,22 @@ export function WorkspaceTranslationSection() {
     const entry: HistoryRow = {
       id: row.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       at: row.at ?? Date.now(),
+      direction: row.direction,
       source: row.source,
-      japanese: row.japanese,
+      translation: row.translation,
       reading: row.reading,
       tone: row.tone,
     };
     setHistory((prev) => {
-      const next = [entry, ...prev.filter((h) => h.source !== entry.source || h.japanese !== entry.japanese)].slice(
+      const next = [
+        entry,
+        ...prev.filter(
+          (h) =>
+            h.source !== entry.source ||
+            h.translation !== entry.translation ||
+            h.direction !== entry.direction
+        ),
+      ].slice(
         0,
         MAX_HISTORY
       );
@@ -170,7 +258,11 @@ export function WorkspaceTranslationSection() {
   const translate = useCallback(async () => {
     const t = source.trim();
     if (!t) {
-      setError("Type or paste English above, then translate.");
+      setError(
+        direction === "en-ja"
+          ? "Type or paste English above, then translate."
+          : "Type or paste Japanese above, then translate."
+      );
       return;
     }
     if (t.length > MAX_SOURCE) {
@@ -183,37 +275,69 @@ export function WorkspaceTranslationSection() {
     cancelSpeechSynthesis();
     setSpeaking(null);
     try {
-      const res = await fetch("/api/translate/en-ja", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: t,
-          style: tone,
-          includeReading,
-          context: context.trim() || undefined,
-        }),
-      });
-      const data = (await res.json()) as TranslateResponse;
-      if (!res.ok) {
-        throw new Error(data.error || "Translation failed.");
+      if (direction === "en-ja") {
+        const res = await fetch("/api/translate/en-ja", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: t,
+            style: tone,
+            includeReading,
+            context: context.trim() || undefined,
+          }),
+        });
+        const data = (await res.json()) as TranslateEnJaResponse;
+        if (!res.ok) {
+          throw new Error(data.error || "Translation failed.");
+        }
+        const next: TranslateResultEnJa = {
+          direction: "en-ja",
+          japanese: data.japanese,
+          reading: data.reading,
+          nuance: data.nuance,
+        };
+        setResult(next);
+        pushHistory({
+          direction: "en-ja",
+          source: t,
+          translation: data.japanese,
+          reading: data.reading,
+          tone,
+        });
+      } else {
+        const res = await fetch("/api/translate/ja-en", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: t,
+            style: tone,
+            context: context.trim() || undefined,
+          }),
+        });
+        const data = (await res.json()) as TranslateJaEnResponse;
+        if (!res.ok) {
+          throw new Error(data.error || "Translation failed.");
+        }
+        const next: TranslateResultJaEn = {
+          direction: "ja-en",
+          english: data.english,
+          nuance: data.nuance,
+        };
+        setResult(next);
+        pushHistory({
+          direction: "ja-en",
+          source: t,
+          translation: data.english,
+          reading: null,
+          tone,
+        });
       }
-      setResult({
-        japanese: data.japanese,
-        reading: data.reading,
-        nuance: data.nuance,
-      });
-      pushHistory({
-        source: t,
-        japanese: data.japanese,
-        reading: data.reading,
-        tone,
-      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
-  }, [source, tone, includeReading, context, pushHistory]);
+  }, [source, tone, includeReading, context, pushHistory, direction]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -285,43 +409,97 @@ export function WorkspaceTranslationSection() {
   }, []);
 
   const toggleJpSpeak = useCallback(() => {
-    if (!result) return;
+    if (!result || result.direction !== "en-ja") return;
     if (speaking === "japanese") stopSpeak();
     else speakLine(result.japanese, "japanese");
   }, [result, speaking, stopSpeak, speakLine]);
 
   const toggleReadSpeak = useCallback(() => {
-    if (!result?.reading) return;
+    if (!result || result.direction !== "en-ja" || !result.reading) return;
     if (speaking === "reading") stopSpeak();
     else speakLine(result.reading, "reading");
   }, [result, speaking, stopSpeak, speakLine]);
 
+  const speakEnglish = useCallback(
+    (text: string) => {
+      if (typeof window === "undefined" || !window.speechSynthesis) {
+        setError("Speech is not supported in this browser.");
+        return;
+      }
+      const trimmed = text.replace(/\s+/g, " ").trim();
+      if (!trimmed) return;
+      setError(null);
+      speakEnglishLine(trimmed, {
+        onEnd: () => setSpeaking(null),
+        onError: (code) => {
+          setSpeaking(null);
+          if (code === "not-allowed") {
+            setError(
+              "Speech was blocked. Allow sound / autoplay for this site in your browser settings, then try again."
+            );
+            return;
+          }
+          const hint =
+            code && code !== "no-api" && code !== "speak-threw" ? ` (${code})` : "";
+          setError(`Could not play speech${hint}. Check volume or try again.`);
+        },
+      });
+      setSpeaking("english");
+    },
+    []
+  );
+
+  const toggleEnglishSpeak = useCallback(() => {
+    if (!result || result.direction !== "ja-en") return;
+    if (speaking === "english") stopSpeak();
+    else speakEnglish(result.english);
+  }, [result, speaking, stopSpeak, speakEnglish]);
+
   const pressJp = useSpeechActivationHandlers(toggleJpSpeak);
   const pressRead = useSpeechActivationHandlers(toggleReadSpeak);
+  const pressEn = useSpeechActivationHandlers(toggleEnglishSpeak);
 
   const applyHistory = (h: HistoryRow) => {
     cancelSpeechSynthesis();
     setSpeaking(null);
+    setDirectionState(h.direction);
+    saveDirection(h.direction);
     setSource(h.source);
     setTone(h.tone);
-    setResult({
-      japanese: h.japanese,
-      reading: h.reading,
-      nuance: null,
-    });
+    if (h.direction === "en-ja") {
+      setResult({
+        direction: "en-ja",
+        japanese: h.translation,
+        reading: h.reading,
+        nuance: null,
+      });
+    } else {
+      setResult({
+        direction: "ja-en",
+        english: h.translation,
+        nuance: null,
+      });
+    }
     setError(null);
     areaRef.current?.focus();
   };
 
-  const tips = useMemo(
-    () => [
-      "Lesson titles and rubric lines",
-      "Short dialogues for class",
-      "App buttons and form labels",
-      "Vocabulary with extra context in the optional box",
-    ],
-    []
-  );
+  const tips = useMemo(() => {
+    if (direction === "en-ja") {
+      return [
+        "Lesson titles and rubric lines",
+        "Short dialogues for class",
+        "App buttons and form labels",
+        "Vocabulary with extra context in the optional box",
+      ];
+    }
+    return [
+      "Manga or news snippets you want in plain English",
+      "Textbook sentences without a provided gloss",
+      "Teacher comments or feedback in Japanese",
+      "Mixed kanji lines — tone still guides how formal the English sounds",
+    ];
+  }, [direction]);
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-8">
@@ -333,13 +511,38 @@ export function WorkspaceTranslationSection() {
         <div className="relative">
           <p className="text-xs font-semibold uppercase tracking-wider text-pink-600/90">Translation</p>
           <h2 className="mt-1 max-w-2xl bg-gradient-to-r from-rose-700 via-pink-600 to-fuchsia-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-3xl">
-            English → Japanese
+            {direction === "en-ja" ? "English → Japanese" : "Japanese → English"}
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-neutral-600">
-            Natural Japanese with tone control, optional hiragana reading, copy buttons, and{" "}
-            <strong className="font-semibold text-neutral-800">listen</strong> with your browser’s Japanese voice — for
-            study and classroom prep.
+            {direction === "en-ja" ? (
+              <>
+                Natural Japanese with tone control, optional hiragana reading, copy buttons, and{" "}
+                <strong className="font-semibold text-neutral-800">listen</strong> with your browser’s Japanese voice —
+                for study and classroom prep.
+              </>
+            ) : (
+              <>
+                Clear English that matches the Japanese register, optional nuance notes, copy, and{" "}
+                <strong className="font-semibold text-neutral-800">listen</strong> with your browser’s English voice.
+              </>
+            )}
           </p>
+          <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Translation direction">
+            <button
+              type="button"
+              className={toneBtn(direction === "en-ja")}
+              onClick={() => pickDirection("en-ja")}
+            >
+              English → Japanese
+            </button>
+            <button
+              type="button"
+              className={toneBtn(direction === "ja-en")}
+              onClick={() => pickDirection("ja-en")}
+            >
+              Japanese → English
+            </button>
+          </div>
           {geminiReady === false && (
             <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50/95 px-4 py-3 text-sm text-amber-950">
               Add <code className="rounded bg-amber-100 px-1">GEMINI_API_KEY</code> to{" "}
@@ -353,8 +556,12 @@ export function WorkspaceTranslationSection() {
         <div className={`${cardShell} flex flex-col`}>
           <div className={gradientBar} aria-hidden />
           <div className="border-b border-pink-50/90 bg-gradient-to-r from-rose-50/90 via-white to-pink-50/50 px-5 py-4 sm:px-6">
-            <h3 className="text-sm font-bold text-neutral-900">English source</h3>
-            <p className="mt-0.5 text-xs text-neutral-500">Up to {MAX_SOURCE.toLocaleString()} characters · ⌘ Enter to translate</p>
+            <h3 className="text-sm font-bold text-neutral-900">
+              {direction === "en-ja" ? "English source" : "Japanese source"}
+            </h3>
+            <p className="mt-0.5 text-xs text-neutral-500">
+              Up to {MAX_SOURCE.toLocaleString()} characters · ⌘ Enter to translate
+            </p>
           </div>
           <div className="flex flex-1 flex-col gap-4 p-5 sm:p-6">
             <button
@@ -389,9 +596,16 @@ export function WorkspaceTranslationSection() {
                   setError(null);
                 }}
                 rows={10}
-                placeholder="Paste a sentence, a list of terms, or a paragraph…"
+                placeholder={
+                  direction === "en-ja"
+                    ? "Paste a sentence, a list of terms, or a paragraph…"
+                    : "貼り付けた文、単語のリスト、段落…"
+                }
                 spellCheck={true}
+                lang={direction === "ja-en" ? "ja" : undefined}
                 className={`mt-1.5 min-h-[12rem] w-full flex-1 resize-y rounded-2xl border bg-white px-4 py-3 text-[15px] leading-relaxed text-neutral-900 shadow-inner outline-none transition focus:ring-2 sm:min-h-[14rem] sm:text-base ${
+                  direction === "ja-en" ? jpFontClass : ""
+                } ${
                   overLimit
                     ? "border-red-300 focus:border-red-400 focus:ring-red-200"
                     : "border-pink-100 focus:border-pink-300 focus:ring-pink-200/80"
@@ -409,12 +623,21 @@ export function WorkspaceTranslationSection() {
 
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Tone</p>
-              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Japanese tone">
+              <p className="mt-1 text-xs text-neutral-500">
+                {direction === "en-ja"
+                  ? "Controls how the Japanese output sounds (です／ます, casual, or neutral)."
+                  : "Guesses how polite or casual the Japanese is and matches that level in English."}
+              </p>
+              <div
+                className="mt-2 flex flex-wrap gap-2"
+                role="group"
+                aria-label={direction === "en-ja" ? "Japanese output tone" : "English register vs Japanese source"}
+              >
                 <button type="button" className={toneBtn(tone === "neutral")} onClick={() => setTone("neutral")}>
                   Neutral
                 </button>
                 <button type="button" className={toneBtn(tone === "polite")} onClick={() => setTone("polite")}>
-                  Polite (です／ます)
+                  Polite{direction === "en-ja" ? " (です／ます)" : ""}
                 </button>
                 <button type="button" className={toneBtn(tone === "casual")} onClick={() => setTone("casual")}>
                   Casual
@@ -422,18 +645,22 @@ export function WorkspaceTranslationSection() {
               </div>
             </div>
 
-            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-pink-100/90 bg-pink-50/30 px-3 py-2.5">
-              <input
-                type="checkbox"
-                checked={includeReading}
-                onChange={(e) => setIncludeReading(e.target.checked)}
-                className="h-4 w-4 rounded border-pink-300 text-pink-600 focus:ring-pink-500"
-              />
-              <span className="text-sm font-medium text-neutral-800">
-                Full hiragana reading line
-                <span className="mt-0.5 block text-xs font-normal text-neutral-500">Helps with kanji you have not learned yet</span>
-              </span>
-            </label>
+            {direction === "en-ja" ? (
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-pink-100/90 bg-pink-50/30 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={includeReading}
+                  onChange={(e) => setIncludeReading(e.target.checked)}
+                  className="h-4 w-4 rounded border-pink-300 text-pink-600 focus:ring-pink-500"
+                />
+                <span className="text-sm font-medium text-neutral-800">
+                  Full hiragana reading line
+                  <span className="mt-0.5 block text-xs font-normal text-neutral-500">
+                    Helps with kanji you have not learned yet
+                  </span>
+                </span>
+              </label>
+            ) : null}
 
             <div className="flex flex-wrap gap-2 pt-1">
               <button
@@ -466,15 +693,23 @@ export function WorkspaceTranslationSection() {
         <div className={`${cardShell} flex min-h-[22rem] flex-col`}>
           <div className={gradientBar} aria-hidden />
           <div className="border-b border-pink-50/90 bg-gradient-to-r from-fuchsia-50/50 via-white to-rose-50/80 px-5 py-4 sm:px-6">
-            <h3 className="text-sm font-bold text-neutral-900">Japanese result</h3>
-            <p className="mt-0.5 text-xs text-neutral-500">Copy or listen — ideal for flashcards, slides, or Sheets</p>
+            <h3 className="text-sm font-bold text-neutral-900">
+              {direction === "en-ja" ? "Japanese result" : "English result"}
+            </h3>
+            <p className="mt-0.5 text-xs text-neutral-500">
+              {direction === "en-ja"
+                ? "Copy or listen — ideal for flashcards, slides, or Sheets"
+                : "Copy or listen — glosses and nuance notes when useful"}
+            </p>
           </div>
           <div className="flex flex-1 flex-col p-5 sm:p-6">
             {!result && !loading && (
               <div className="flex flex-1 flex-col justify-center gap-4 rounded-2xl border border-dashed border-pink-100 bg-gradient-to-b from-pink-50/40 to-white px-4 py-10 text-center">
                 <p className="text-sm font-medium text-neutral-700">Ready when you are</p>
                 <p className="text-xs leading-relaxed text-neutral-500">
-                  Your translation, optional reading line, nuance note, and speech buttons will appear here.
+                  {direction === "en-ja"
+                    ? "Your translation, optional reading line, nuance note, and speech buttons will appear here."
+                    : "Your English translation, optional nuance note, and speech will appear here."}
                 </p>
               </div>
             )}
@@ -487,7 +722,7 @@ export function WorkspaceTranslationSection() {
                 <p className="text-sm font-semibold text-pink-900">Working on it…</p>
               </div>
             )}
-            {result && !loading && (
+            {result && !loading && result.direction === "en-ja" && (
               <div className="flex flex-1 flex-col gap-6" lang="ja">
                 <div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -622,6 +857,73 @@ export function WorkspaceTranslationSection() {
                 </div>
               </div>
             )}
+            {result && !loading && result.direction === "ja-en" && (
+              <div className="flex flex-1 flex-col gap-6" lang="en">
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-pink-600/90">English</p>
+                    {ttsSupported ? (
+                      <button
+                        type="button"
+                        onPointerDown={pressEn.onPointerDown}
+                        onClick={pressEn.onClick}
+                        className={
+                          speaking === "english"
+                            ? `${btnStopSpeak} shrink-0 py-1.5 text-xs min-h-9`
+                            : `${btnGhost} shrink-0 py-1.5 text-xs min-h-9`
+                        }
+                        aria-label={speaking === "english" ? "Stop speech" : "Speak English translation"}
+                      >
+                        {speaking === "english" ? "Stop" : "Speak"}
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 whitespace-pre-wrap break-words text-xl font-semibold leading-snug text-neutral-900 sm:text-2xl">
+                    {result.english}
+                  </p>
+                </div>
+                {result.nuance && (
+                  <p className="rounded-xl border border-neutral-100 bg-neutral-50/90 px-3 py-2 text-xs leading-relaxed text-neutral-700">
+                    <span className="font-semibold text-neutral-800">Note: </span>
+                    {result.nuance}
+                  </p>
+                )}
+                <div className="mt-auto space-y-4 border-t border-pink-100/80 pt-6">
+                  <div>
+                    <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-neutral-400">Copy</p>
+                    <div className={actionGrid}>
+                      <button
+                        type="button"
+                        className={`${btnGhost} w-full`}
+                        onClick={() => void copyText("en", result.english)}
+                      >
+                        {copied === "en" ? "Copied English" : "Copy English"}
+                      </button>
+                    </div>
+                  </div>
+                  {ttsSupported && (
+                    <div>
+                      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-neutral-400">Listen</p>
+                      <div className={actionGrid}>
+                        <button
+                          type="button"
+                          className={speaking === "english" ? `${btnStopSpeak} w-full` : `${btnGhost} w-full`}
+                          aria-label={speaking === "english" ? "Stop speech" : "Speak English translation"}
+                          onPointerDown={pressEn.onPointerDown}
+                          onClick={pressEn.onClick}
+                        >
+                          {speaking === "english" ? "Stop" : "Speak English"}
+                        </button>
+                      </div>
+                      <p className="mt-3 text-xs leading-relaxed text-neutral-500">
+                        English voices are usually available out of the box. If you hear nothing, check site sound
+                        permissions and system volume.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -652,11 +954,16 @@ export function WorkspaceTranslationSection() {
                     className="flex w-full flex-col gap-2 rounded-2xl border border-pink-100/90 bg-gradient-to-br from-white to-rose-50/30 p-4 text-left shadow-sm transition hover:border-pink-200 hover:shadow-md"
                   >
                     <span className="line-clamp-2 text-xs text-neutral-500">{h.source}</span>
-                    <span className={`line-clamp-2 text-sm font-semibold text-pink-950 ${jpFontClass}`}>
-                      {h.japanese}
+                    <span
+                      className={`line-clamp-2 text-sm font-semibold text-pink-950 ${
+                        h.direction === "en-ja" ? jpFontClass : ""
+                      }`}
+                    >
+                      {h.translation}
                     </span>
                     <span className="text-[10px] font-medium uppercase tracking-wide text-pink-400">
-                      {h.tone} · {new Date(h.at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
+                      {h.direction === "en-ja" ? "EN→JP" : "JP→EN"} · {h.tone} ·{" "}
+                      {new Date(h.at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
                     </span>
                   </button>
                 </li>

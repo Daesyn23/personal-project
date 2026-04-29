@@ -25,6 +25,13 @@ function nameFromFilename(filename: string): string {
   return filename.replace(/\.[^.]+$/u, "").replace(/[_-]+/g, " ").trim() || "New set";
 }
 
+/** Row has no slide-1 content — skip instead of creating an empty card. */
+function rowHasEnglishOrKana(r: FlashcardDraft): boolean {
+  const def = (r.definition ?? "").trim();
+  const ka = (r.kana ?? "").trim();
+  return def.length > 0 || ka.length > 0;
+}
+
 export function ImportFlashcards({ onImported }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -151,14 +158,18 @@ export function ImportFlashcards({ onImported }: Props) {
       setError("Add at least one card (paste lesson lines, choose a file, or fill the table).");
       return;
     }
+    const payload: FlashcardDraft[] = rows.filter(rowHasEnglishOrKana).map((r, i) => {
+      const { _key, ...rest } = r;
+      void _key;
+      return { ...rest, position: i };
+    });
+    if (payload.length === 0) {
+      setError("Every row is blank in English and kana. Add text in at least one row, or remove empty rows.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const payload: FlashcardDraft[] = rows.map((r, i) => {
-        const { _key, ...rest } = r;
-        void _key;
-        return { ...rest, position: i };
-      });
       const setId = await createCardSet(name);
       await addCardsToSet(setId, payload);
       closeModal();
