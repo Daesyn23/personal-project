@@ -16,8 +16,24 @@ export const maxDuration = 120;
 const CHUNK_SIZE = 12;
 const MAX_CARDS = 120;
 
-const SYSTEM_INSTRUCTION = `You help Japanese teachers prepare vocabulary cards.
+const TEACHER_RESEARCH_TAGLISH_RULES = `**teacher_research (MANDATORY LANGUAGE — read carefully):**
+- Write **Taglish only**: natural **code-mix of Filipino/Tagalog + English** (Philippine classroom / teacher lounge style).
+- **FORBIDDEN**: paragraphs that are **English-only**. If the text could pass as a UK/US textbook footnote with zero Tagalog, it is **wrong**.
+- In **every sentence**, include **at least one** clear Tagalog/Filipino word or phrase (e.g. *ito, kasi, tandaan, halimbawa, pwede, importante, para sa, kailangan, ganito, ibig sabihin, mag-ingat, paliwanag*). Mix freely with English and Japanese terms.
+- 2–6 sentences. Prep notes for the teacher only — not for student slides.
+- OK to keep Japanese headwords and English grammar labels (*ichidan*, *particle*) where useful; the **prose around them must stay Taglish**.
+- If unsure, say so briefly **in Taglish** — do not invent facts.
+
+**Good example (shape + density of Tagalog — adapt content to each vocab item):**
+"Group II (ichidan) verb ito. Tandaan ang nuance: ang *wasuremasu* parang nakalimutan mo lang o naiwan — medyo absent-minded; ang *nakushimasu* mas parang nawala na talaga o 'di mo na mahanap. Halimbawa, naiwan mo ang wallet sa lamesa → *wasure*. Kung wala na sa mundo mo ang wallet → *nakushimasu* ang vibe. I-emphasize sa class ang 'carelessly' sa English definition para lumabas yung light na oversight."
+
+**Bad example (do NOT do this — English-only):**
+"This is a Group II verb. The difference between wasuremasu and nakushimasu is key. Wasuremasu implies..."`;
+
+const SYSTEM_INSTRUCTION = `You help Japanese teachers in the Philippines prepare vocabulary cards.
 You MUST reply with a single JSON object only. No markdown fences, no commentary outside JSON.
+
+${TEACHER_RESEARCH_TAGLISH_RULES}
 
 Schema:
 {
@@ -47,7 +63,7 @@ Rules for EACH input item (matched by "id"):
   - If the headword is **not** a classified verb (e.g. bare noun with no group), set category_label to **null**.
 - "example_sentence": natural Japanese sentence using the vocabulary (です／ます or plain as fits the item); keep it classroom-appropriate.
 - "example_translation": English gloss of the example only.
-- "teacher_research": 2–6 sentences in English: cultural context, etymology, nuance, or memorable story hooks for the TEACHER to read before class. This text must NOT be written as if shown to students on a slide; it is prep notes only. If unsure, say so briefly rather than inventing facts.
+- "teacher_research": follow the **teacher_research (MANDATORY LANGUAGE)** block at the top of this prompt exactly — Taglish with Tagalog in every sentence; never English-only prose.
 - Output one object per input id, same order as the input list, same ids — no extras, no omissions.
 - **Critical for "id"**: Copy each input **id** exactly (full UUID string, same characters and length). Do not renumber (1,2,3), shorten, "fix" casing, or drop the id field on any row.`;
 
@@ -309,6 +325,8 @@ export async function POST(req: Request) {
     const userBlock = [
       "Generate fields for each vocabulary item below. Return JSON only.",
       "Each output object must use the same id string as the matching input line (copy the UUID exactly).",
+      "",
+      "REMINDER — teacher_research: TAGLISH ONLY (Filipino/Tagalog mixed with English). Each sentence must contain Tagalog words. English-only teacher_research is invalid.",
       "",
       JSON.stringify(
         chunk.map((c) => ({ id: c.id, kana: c.kana, english: c.definition })),

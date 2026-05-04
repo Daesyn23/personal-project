@@ -2,6 +2,21 @@
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  ALARM_SOUND_OPTIONS,
+  computeAlarmFadeOutSeconds,
+  type AlarmSoundId,
+  parseStoredAlarmDuration,
+  parseStoredAlarmSound,
+  playTimerAlarm,
+  playTimerAlarmPreview,
+  TIMER_ALARM_DURATION_DEFAULT_SECONDS,
+  TIMER_ALARM_DURATION_MAX,
+  TIMER_ALARM_DURATION_MIN,
+  TIMER_ALARM_DURATION_STORAGE_KEY,
+  TIMER_ALARM_PREVIEW_DURATION_SECONDS,
+  TIMER_ALARM_STORAGE_KEY,
+} from "@/lib/timerAlarmSounds";
 
 function clampInt(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min;
@@ -113,8 +128,6 @@ function CompactClockFace({ totalSeconds, finished }: { totalSeconds: number; fi
   );
 }
 
-const FINISH_ALARM_SECONDS = 5;
-
 /** Sakura firework burst from center when time’s up; cleared after animation. */
 const FINISH_FIREWORK_PETAL_COUNT = 96;
 const FINISH_FIREWORK_CLEAR_MS = 4000;
@@ -135,42 +148,6 @@ function buildSakuraFireworkPetals(seed: number, count: number) {
     const h = 10 + (i % 6);
     return { id: `timer-fw-${seed}-${i}`, dx, dy, rot, delay, dur, w, h };
   });
-}
-
-/** ~5s soft repeating tones when the countdown completes — even level (no fade), Web Audio. */
-function playTimerFinishedChime() {
-  if (typeof window === "undefined") return;
-  const Ctor =
-    window.AudioContext ??
-    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return;
-  try {
-    const ctx = new Ctor();
-    const peak = 0.038;
-    const beep = (freq: number, t0: number, len: number) => {
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, t0);
-      osc.connect(g);
-      g.connect(ctx.destination);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.04);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + len - 0.04);
-      osc.start(t0);
-      osc.stop(t0 + len);
-    };
-    const t = ctx.currentTime;
-    const step = 0.62;
-    const beepLen = 0.28;
-    const freqs = [392, 440, 349.23, 392] as const;
-    for (let time = 0, i = 0; time < FINISH_ALARM_SECONDS - 0.06; time += step, i++) {
-      beep(freqs[i % freqs.length], t + time, beepLen);
-    }
-    window.setTimeout(() => void ctx.close(), (FINISH_ALARM_SECONDS + 0.5) * 1000);
-  } catch {
-    /* autoplay or AudioContext unsupported */
-  }
 }
 
 const inputNumberClass =
@@ -194,9 +171,45 @@ const dockBtnOutlinePink =
 const dockBtnOutlineNeutral =
   "inline-flex min-h-[52px] items-center justify-center rounded-xl border-2 border-neutral-300 bg-white px-3 text-sm font-semibold text-neutral-800 shadow-sm transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 focus-visible:ring-offset-white";
 
+function TimerSoundSettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+      />
+      <path
+        d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c0 .69.28 1.32.74 1.78.46.46 1.09.74 1.78.74H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function WorkspaceTimerSection() {
   const panelRef = useRef<HTMLDivElement>(null);
   const playedFinishChimeRef = useRef(false);
+  const previewHandleRef = useRef<ReturnType<typeof playTimerAlarmPreview> | null>(null);
+  const [alarmSoundOpen, setAlarmSoundOpen] = useState(false);
+  const [alarmSoundId, setAlarmSoundId] = useState<AlarmSoundId>(() => {
+    if (typeof window === "undefined") return "soft-melody";
+    try {
+      return parseStoredAlarmSound(localStorage.getItem(TIMER_ALARM_STORAGE_KEY));
+    } catch {
+      return "soft-melody";
+    }
+  });
+  const [alarmDurationSeconds, setAlarmDurationSeconds] = useState(() => {
+    if (typeof window === "undefined") return TIMER_ALARM_DURATION_DEFAULT_SECONDS;
+    try {
+      return parseStoredAlarmDuration(localStorage.getItem(TIMER_ALARM_DURATION_STORAGE_KEY));
+    } catch {
+      return TIMER_ALARM_DURATION_DEFAULT_SECONDS;
+    }
+  });
   const [hoursInput, setHoursInput] = useState("0");
   const [minutesInput, setMinutesInput] = useState("5");
   const [secondsInput, setSecondsInput] = useState("0");
@@ -218,6 +231,51 @@ export function WorkspaceTimerSection() {
     setFinished(false);
     return true;
   }, [hoursInput, minutesInput, secondsInput]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TIMER_ALARM_STORAGE_KEY, alarmSoundId);
+    } catch {
+      /* quota or private mode */
+    }
+  }, [alarmSoundId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TIMER_ALARM_DURATION_STORAGE_KEY, String(alarmDurationSeconds));
+    } catch {
+      /* quota or private mode */
+    }
+  }, [alarmDurationSeconds]);
+
+  const stopAlarmPreview = useCallback(() => {
+    previewHandleRef.current?.cancel();
+    previewHandleRef.current = null;
+  }, []);
+
+  const playAlarmPreview = useCallback(
+    (id: AlarmSoundId) => {
+      stopAlarmPreview();
+      previewHandleRef.current = playTimerAlarmPreview(id);
+    },
+    [stopAlarmPreview]
+  );
+
+  useEffect(() => {
+    return () => stopAlarmPreview();
+  }, [stopAlarmPreview]);
+
+  useEffect(() => {
+    if (!alarmSoundOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAlarmSoundOpen(false);
+        stopAlarmPreview();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [alarmSoundOpen, stopAlarmPreview]);
 
   useEffect(() => {
     if (!running) return;
@@ -243,8 +301,8 @@ export function WorkspaceTimerSection() {
     }
     if (playedFinishChimeRef.current) return;
     playedFinishChimeRef.current = true;
-    playTimerFinishedChime();
-  }, [finished]);
+    playTimerAlarm(alarmSoundId, alarmDurationSeconds);
+  }, [finished, alarmSoundId, alarmDurationSeconds]);
 
   useLayoutEffect(() => {
     if (!finished) {
@@ -256,9 +314,9 @@ export function WorkspaceTimerSection() {
 
   useEffect(() => {
     if (!finished) return;
-    const tid = window.setTimeout(() => setFinishDigitPhase("solid"), FINISH_ALARM_SECONDS * 1000);
+    const tid = window.setTimeout(() => setFinishDigitPhase("solid"), alarmDurationSeconds * 1000);
     return () => window.clearTimeout(tid);
-  }, [finished]);
+  }, [finished, alarmDurationSeconds]);
 
   useEffect(() => {
     if (!finished) {
@@ -368,11 +426,25 @@ export function WorkspaceTimerSection() {
   return (
     <section className="min-w-0 overflow-hidden rounded-2xl border border-pink-200/80 bg-white/95 shadow-lg shadow-pink-200/30 sm:rounded-3xl">
       <div className="border-b border-pink-100/90 bg-gradient-to-r from-pink-50/80 via-white to-rose-50/50 px-4 py-5 sm:px-8 sm:py-7">
-        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-pink-600">Focus</p>
-        <h2 className="mt-1.5 text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl">Countdown timer</h2>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-600">
-          Pick a preset or set your own time, then go fullscreen when you only want the clock on screen.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-pink-600">Focus</p>
+            <h2 className="mt-1.5 text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl">Countdown timer</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-600">
+              Pick a preset or set your own time, then go fullscreen when you only want the clock on screen.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAlarmSoundOpen(true)}
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl border-2 border-pink-200/90 bg-white px-3 py-2 text-sm font-semibold text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 focus-visible:ring-offset-2"
+            aria-haspopup="dialog"
+            aria-expanded={alarmSoundOpen}
+          >
+            <TimerSoundSettingsIcon className="h-5 w-5 text-pink-600" />
+            <span className="hidden sm:inline">Alarm sound</span>
+          </button>
+        </div>
       </div>
 
       <div
@@ -390,6 +462,20 @@ export function WorkspaceTimerSection() {
               <div className="seasonal-snow-field seasonal-snow-field-a absolute inset-[-15%_0_-10%_0]" />
               <div className="seasonal-snow-field seasonal-snow-field-b absolute inset-[-15%_0_-10%_0]" />
             </div>
+            <button
+              type="button"
+              onClick={() => setAlarmSoundOpen(true)}
+              className="fixed z-[6] inline-flex items-center justify-center rounded-xl border-2 border-pink-200/90 bg-white/95 p-2.5 text-pink-900 shadow-md backdrop-blur-sm transition hover:border-pink-400 hover:bg-pink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 focus-visible:ring-offset-2"
+              style={{
+                top: "max(12px, env(safe-area-inset-top, 0px))",
+                right: "max(12px, env(safe-area-inset-right, 0px))",
+              }}
+              aria-label="Alarm sound settings"
+              aria-haspopup="dialog"
+              aria-expanded={alarmSoundOpen}
+            >
+              <TimerSoundSettingsIcon className="h-6 w-6 text-pink-600" />
+            </button>
           </>
         )}
 
@@ -621,6 +707,114 @@ export function WorkspaceTimerSection() {
           </div>
         )}
       </div>
+
+      {alarmSoundOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="timer-alarm-sound-title"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              setAlarmSoundOpen(false);
+              stopAlarmPreview();
+            }
+          }}
+        >
+          <div className="flex max-h-[min(640px,90dvh)] w-full max-w-md flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
+            <div className="border-b border-pink-100 px-4 py-4 sm:px-5">
+              <h2 id="timer-alarm-sound-title" className="text-lg font-semibold text-neutral-900">
+                When time&apos;s up
+              </h2>
+              <p className="mt-1 text-sm text-neutral-500">
+                Choose a tone and how long it plays. The alarm eases out at the end so it doesn&apos;t stop abruptly.
+                Previews run about{" "}
+                <span className="font-semibold text-neutral-700 tabular-nums">
+                  {Math.round(TIMER_ALARM_PREVIEW_DURATION_SECONDS * 10) / 10}s
+                </span>{" "}
+                (with the same fade).
+              </p>
+              <div className="mt-4 rounded-xl border border-pink-100 bg-pink-50/50 px-3 py-3 sm:px-4">
+                <label htmlFor="timer-alarm-duration" className="block text-xs font-bold uppercase tracking-wider text-neutral-600">
+                  Alarm length
+                </label>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <input
+                    id="timer-alarm-duration"
+                    type="range"
+                    min={TIMER_ALARM_DURATION_MIN}
+                    max={TIMER_ALARM_DURATION_MAX}
+                    step={1}
+                    value={alarmDurationSeconds}
+                    onChange={(e) => setAlarmDurationSeconds(Number.parseInt(e.target.value, 10))}
+                    className="h-2 min-w-0 flex-1 cursor-pointer accent-pink-600"
+                  />
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-neutral-900">
+                    {alarmDurationSeconds}s
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-neutral-500">
+                  Fade-out: ~{Math.round(computeAlarmFadeOutSeconds(alarmDurationSeconds) * 10) / 10}s at the end (set
+                  automatically).
+                </p>
+              </div>
+            </div>
+            <ul className="min-h-0 flex-1 overflow-auto px-3 py-2 sm:px-4">
+              {ALARM_SOUND_OPTIONS.map((opt) => {
+                const selected = alarmSoundId === opt.id;
+                return (
+                  <li
+                    key={opt.id}
+                    className={`rounded-xl border px-3 py-2.5 sm:px-3.5 sm:py-3 ${
+                      selected ? "border-pink-400 bg-pink-50/80" : "border-transparent hover:bg-pink-50/40"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2 sm:gap-3">
+                      <input
+                        id={`timer-alarm-${opt.id}`}
+                        type="radio"
+                        name="workspace-timer-alarm"
+                        checked={selected}
+                        onChange={() => {
+                          setAlarmSoundId(opt.id);
+                          playAlarmPreview(opt.id);
+                        }}
+                        className="mt-1 h-4 w-4 shrink-0 accent-pink-600"
+                      />
+                      <label htmlFor={`timer-alarm-${opt.id}`} className="min-w-0 flex-1 cursor-pointer">
+                        <span className="block text-sm font-semibold text-neutral-900">{opt.label}</span>
+                        <span className="mt-0.5 block text-xs text-neutral-500">{opt.hint}</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          playAlarmPreview(opt.id);
+                        }}
+                        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-pink-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-pink-900 shadow-sm transition hover:bg-pink-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
+                      >
+                        Preview
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="border-t border-pink-100 px-4 py-3 sm:px-5">
+              <button
+                type="button"
+                onClick={() => {
+                  setAlarmSoundOpen(false);
+                  stopAlarmPreview();
+                }}
+                className="inline-flex w-full min-h-[44px] items-center justify-center rounded-xl bg-gradient-to-r from-pink-600 to-rose-500 px-4 text-sm font-semibold text-white shadow-md transition hover:brightness-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 focus-visible:ring-offset-2"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

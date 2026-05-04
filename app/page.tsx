@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { AddCardForm } from "@/components/AddCardForm";
 import { BulkEditFlashcardsModal } from "@/components/BulkEditFlashcardsModal";
 import { CollectionSetCard } from "@/components/CollectionSetCard";
@@ -105,6 +105,17 @@ export default function HomePage() {
       setPresentOpen(false);
     }
   }, [workspaceArea]);
+
+  useEffect(() => {
+    if (!activeSetId && workspaceArea === "lessonPlan") {
+      setWorkspaceArea("flashcards");
+    }
+  }, [activeSetId, workspaceArea]);
+
+  const workspaceTabsVisible = useMemo(() => {
+    if (activeSetId) return WORKSPACE_TABS;
+    return WORKSPACE_TABS.filter((t) => t.id !== "lessonPlan");
+  }, [activeSetId]);
 
   useLayoutEffect(() => {
     if (!activeSetId) {
@@ -293,7 +304,7 @@ export default function HomePage() {
               className="flex gap-0.5 overflow-x-auto overscroll-x-contain border-b border-pink-100/90 pb-px [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x sm:gap-1 [&::-webkit-scrollbar]:hidden"
               aria-label="Workspace areas"
             >
-              {WORKSPACE_TABS.map((tab) => (
+              {workspaceTabsVisible.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"

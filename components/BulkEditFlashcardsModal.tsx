@@ -300,7 +300,8 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
             Each row is one card. English gloss and/or kana is required unless you clear the whole row (save will delete
             it) or use the trash icon to remove a card immediately.{" "}
             <strong className="font-semibold text-neutral-700">Teacher research</strong> is prep only and never appears
-            on presentation slides.
+            on presentation slides. AI fills it in <strong className="font-semibold text-neutral-700">Taglish</strong>{" "}
+            (Tagalog–English mix); clear the cell and run autofill again to regenerate.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
