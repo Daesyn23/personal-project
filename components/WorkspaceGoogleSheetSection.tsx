@@ -1509,7 +1509,7 @@ export function WorkspaceGoogleSheetSection() {
               <button type="button" onClick={startGoogleSheetsOAuth} className={oauthLinkBtn}>
                 Connect Google
               </button>{" "}
-              and approve access (the refresh token is saved on this machine automatically).
+              and approve access (the refresh token is saved automatically when disk or Supabase storage is available).
             </p>
           )}
 
@@ -1519,8 +1519,11 @@ export function WorkspaceGoogleSheetSection() {
               <button type="button" onClick={startGoogleSheetsOAuth} className={oauthLinkBtn}>
                 Connect Google
               </button>{" "}
-              and approve access in Google; you will return here with Sheets enabled. On hosts with a read-only disk,
-              set <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> in the environment instead.
+              and approve access in Google; you will return here with Sheets enabled. On read-only hosts (e.g. Vercel),
+              either set server env <code className="rounded bg-amber-100 px-1">SUPABASE_SERVICE_ROLE_KEY</code> and
+              run the <code className="rounded bg-amber-100 px-1">workspace_google_sheets_oauth</code> migration so the
+              token is stored in Supabase (no pasted token), or set{" "}
+              <code className="rounded bg-amber-100 px-1">GOOGLE_REFRESH_TOKEN</code> manually.
             </p>
           )}
 
@@ -1540,7 +1543,8 @@ export function WorkspaceGoogleSheetSection() {
               <p className="mt-2 text-xs text-red-800/85">
                 If this keeps failing, remove an outdated{" "}
                 <code className="rounded bg-red-100/90 px-1">GOOGLE_REFRESH_TOKEN</code> from{" "}
-                <code className="rounded bg-red-100/90 px-1">.env.local</code> — that value overrides the saved file.
+                <code className="rounded bg-red-100/90 px-1">.env.local</code> / Vercel env — it overrides tokens stored on
+                disk or in Supabase.
               </p>
             </div>
           )}
@@ -1666,7 +1670,8 @@ export function WorkspaceGoogleSheetSection() {
                 <p className="mt-2 text-xs text-red-800/85">
                   If this keeps failing, remove an outdated{" "}
                   <code className="rounded bg-red-100/90 px-1">GOOGLE_REFRESH_TOKEN</code> from{" "}
-                  <code className="rounded bg-red-100/90 px-1">.env.local</code> — that value overrides the saved file.
+                  <code className="rounded bg-red-100/90 px-1">.env.local</code> / Vercel env — it overrides tokens stored on
+                  disk or in Supabase.
                 </p>
               </div>
             )}

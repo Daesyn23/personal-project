@@ -1,5 +1,6 @@
 import { OAuth2Client } from "google-auth-library";
 import { google } from "googleapis";
+import { readRefreshTokenFromSupabase } from "@/lib/google-sheets-token-supabase";
 import { readStoredRefreshToken } from "@/lib/google-sheets-token-store";
 
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
@@ -15,16 +16,19 @@ export async function googleSheetsEnvReady(): Promise<{
 }> {
   const fromEnv = Boolean(process.env.GOOGLE_REFRESH_TOKEN?.trim());
   const fromFile = Boolean((await readStoredRefreshToken())?.trim());
+  const fromDb = Boolean((await readRefreshTokenFromSupabase())?.trim());
   return {
     clientId: Boolean(process.env.GOOGLE_CLIENT_ID?.trim()),
     clientSecret: Boolean(process.env.GOOGLE_CLIENT_SECRET?.trim()),
-    refreshToken: fromEnv || fromFile,
+    refreshToken: fromEnv || fromFile || fromDb,
   };
 }
 
 async function resolveRefreshToken(): Promise<string | null> {
   const fromEnv = process.env.GOOGLE_REFRESH_TOKEN?.trim();
   if (fromEnv) return fromEnv;
+  const fromDb = await readRefreshTokenFromSupabase();
+  if (fromDb) return fromDb;
   return readStoredRefreshToken();
 }
 
