@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelSpeechSynthesis } from "@/lib/japanese-tts";
 import type { FlashcardRow } from "@/lib/types";
-import { FlashcardSlide } from "@/components/FlashcardSlide";
+import { FlashcardSlide, type FlashcardSlideHandle } from "@/components/FlashcardSlide";
 import {
   hasDetailPhase,
   type PresentationPhase,
@@ -25,6 +25,7 @@ export function PresentFlashcards({
   onIndexChange,
 }: Props) {
   const card = cards[index];
+  const slideRef = useRef<FlashcardSlideHandle>(null);
   const [phase, setPhase] = useState<PresentationPhase>("word");
 
   useEffect(() => {
@@ -66,6 +67,16 @@ export function PresentFlashcards({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=true]")) return;
+
+      // Toggle speech with Ctrl or Shift (same as speaker button)
+      if (!e.repeat && (e.key === "Control" || e.key === "Shift")) {
+        e.preventDefault();
+        slideRef.current?.toggleSpeak();
+        return;
+      }
+
       if (e.key === "Escape") onClose();
       if (e.key === "ArrowRight" || e.key === " ") {
         e.preventDefault();
@@ -123,6 +134,9 @@ export function PresentFlashcards({
             Card {index + 1} / {cards.length}
           </span>
           <span className="block text-xs text-pink-600">{phaseLabel}</span>
+          <span className="mt-1 block text-[11px] text-neutral-400">
+            Ctrl or Shift — listen · Space / → next · ← back · Esc close
+          </span>
         </span>
       </header>
 
@@ -131,7 +145,7 @@ export function PresentFlashcards({
           key={card.id}
           className="flashcard-enter w-full max-w-3xl"
         >
-          <FlashcardSlide card={card} phase={phase} />
+          <FlashcardSlide ref={slideRef} card={card} phase={phase} />
         </div>
       </div>
     </div>

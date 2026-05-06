@@ -48,3 +48,25 @@ export type WorkspaceFileRow = {
   byte_size: number | null;
   created_at?: string;
 };
+
+/** Whisper phrase segment (Groq) persisted with audio lessons */
+export type AudioLessonSegment = {
+  startSec: number;
+  endSec: number;
+  text?: string;
+};
+
+export type AudioLessonRow = {
+  id: string;
+  title: string;
+  filename: string;
+  storage_path: string;
+  mime_type: string | null;
+  byte_size: number | null;
+  duration_sec: number;
+  sample_rate: number;
+  number_of_channels: number;
+  segments: AudioLessonSegment[];
+  created_at: string;
+  updated_at: string;
+};

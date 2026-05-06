@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { FlashcardRow } from "@/lib/types";
 import type { PresentationPhase } from "@/components/presentation-phase";
 import { japaneseLine } from "@/components/presentation-phase";
 import { cancelSpeechSynthesis, speakEnglishLine, speakJapaneseLine } from "@/lib/japanese-tts";
 import { useSpeechActivationHandlers } from "@/lib/useSpeechActivationHandlers";
+
+export type FlashcardSlideHandle = {
+  /** Same as the speaker button: play / stop TTS for this slide. */
+  toggleSpeak: () => void;
+};
 
 type Props = {
   card: FlashcardRow;
@@ -152,7 +157,10 @@ function IconStopSpeech({ className }: { className?: string }) {
   );
 }
 
-export function FlashcardSlide({ card, phase = "word", className = "" }: Props) {
+export const FlashcardSlide = forwardRef<FlashcardSlideHandle, Props>(function FlashcardSlide(
+  { card, phase = "word", className = "" },
+  ref
+) {
   const jpLine = japaneseLine(card);
   const cat = card.category_label?.trim();
   const def = (card.definition ?? "").trim();
@@ -247,6 +255,16 @@ export function FlashcardSlide({ card, phase = "word", className = "" }: Props) 
 
   const speakPress = useSpeechActivationHandlers(handleSpeakToggle);
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      toggleSpeak: () => {
+        handleSpeakToggle();
+      },
+    }),
+    [handleSpeakToggle]
+  );
+
   return (
     <div
       className={`relative flex min-h-[380px] flex-col items-stretch justify-center gap-0 rounded-2xl bg-white px-6 py-12 shadow-lg shadow-pink-100/80 ring-1 ring-pink-100/80 transition-shadow duration-300 sm:px-10 ${className}`}
@@ -330,4 +348,6 @@ export function FlashcardSlide({ card, phase = "word", className = "" }: Props) 
       </div>
     </div>
   );
-}
+});
+
+FlashcardSlide.displayName = "FlashcardSlide";
