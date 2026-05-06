@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createOAuth2Client, sheetsScope } from "@/lib/google-sheets-server";
+import { createOAuth2Client, workspaceGoogleOAuthScopes } from "@/lib/google-sheets-server";
 
 export const runtime = "nodejs";
 
@@ -23,7 +23,7 @@ export function GET(req: NextRequest) {
   const authUrl = client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: [sheetsScope()],
+    scope: workspaceGoogleOAuthScopes(),
     redirect_uri: redirectUri,
   });
 

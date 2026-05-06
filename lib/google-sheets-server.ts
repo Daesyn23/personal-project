@@ -5,8 +5,20 @@ import { readStoredRefreshToken } from "@/lib/google-sheets-token-store";
 
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
+/** Same OAuth client as Sheets — enables playlist reads without YOUTUBE_API_KEY when YouTube Data API v3 is enabled in GCP. */
+const YOUTUBE_READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly";
+
 export function sheetsScope(): string {
   return SHEETS_SCOPE;
+}
+
+export function youtubeReadonlyScope(): string {
+  return YOUTUBE_READONLY_SCOPE;
+}
+
+/** Scopes requested by /api/google-sheets/auth (Sheets + YouTube playlist metadata). */
+export function workspaceGoogleOAuthScopes(): string[] {
+  return [SHEETS_SCOPE, YOUTUBE_READONLY_SCOPE];
 }
 
 export async function googleSheetsEnvReady(): Promise<{
@@ -54,7 +66,7 @@ export function createOAuth2Client(redirectUri: string): OAuth2Client | null {
   return new OAuth2Client(id, secret, redirectUri);
 }
 
-export async function getSheetsClient() {
+export async function getGoogleOAuth2Client(): Promise<OAuth2Client> {
   const id = process.env.GOOGLE_CLIENT_ID?.trim();
   const secret = process.env.GOOGLE_CLIENT_SECRET?.trim();
   const refreshToken = await resolveRefreshToken();
@@ -68,5 +80,10 @@ export async function getSheetsClient() {
   }
   const oauth2 = new OAuth2Client(id, secret);
   oauth2.setCredentials({ refresh_token: refreshToken });
+  return oauth2;
+}
+
+export async function getSheetsClient() {
+  const oauth2 = await getGoogleOAuth2Client();
   return google.sheets({ version: "v4", auth: oauth2 });
 }

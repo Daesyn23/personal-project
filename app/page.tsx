@@ -16,6 +16,7 @@ import { WorkspaceTimerSection } from "@/components/WorkspaceTimerSection";
 import { WorkspaceJapaneseGrammarSection } from "@/components/WorkspaceJapaneseGrammarSection";
 import { WorkspaceLessonPlanSection } from "@/components/WorkspaceLessonPlanSection";
 import { WorkspaceTranslationSection } from "@/components/WorkspaceTranslationSection";
+import { WorkspaceYoutubeSection } from "@/components/WorkspaceYoutubeSection";
 import {
   deleteCardSet,
   deleteFlashcards,
@@ -44,6 +45,7 @@ type WorkspaceArea =
   | "timer"
   | "translate"
   | "grammar"
+  | "youtube"
   | "lessonPlan";
 
 const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
@@ -53,6 +55,7 @@ const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
   { id: "timer", label: "Timer" },
   { id: "translate", label: "Translate" },
   { id: "grammar", label: "Grammar" },
+  { id: "youtube", label: "Video Lessons" },
   { id: "lessonPlan", label: "Lesson plan" },
 ];
 
@@ -100,6 +103,7 @@ export default function HomePage() {
       workspaceArea === "timer" ||
       workspaceArea === "translate" ||
       workspaceArea === "grammar" ||
+      workspaceArea === "youtube" ||
       workspaceArea === "lessonPlan"
     ) {
       setPresentOpen(false);
@@ -332,6 +336,8 @@ export default function HomePage() {
           <WorkspaceTranslationSection />
         ) : workspaceArea === "grammar" ? (
           <WorkspaceJapaneseGrammarSection />
+        ) : workspaceArea === "youtube" ? (
+          <WorkspaceYoutubeSection />
         ) : workspaceArea === "lessonPlan" ? (
           <WorkspaceLessonPlanSection activeSetId={activeSetId} setTitle={activeSetName ?? null} />
         ) : (

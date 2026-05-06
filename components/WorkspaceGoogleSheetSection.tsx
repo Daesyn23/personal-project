@@ -1519,7 +1519,8 @@ export function WorkspaceGoogleSheetSection() {
               <button type="button" onClick={startGoogleSheetsOAuth} className={oauthLinkBtn}>
                 Connect Google
               </button>{" "}
-              and approve access in Google; you will return here with Sheets enabled. On read-only hosts (e.g. Vercel),
+              and approve access in Google (Sheets plus read-only YouTube playlists for the Video Lessons tab); you will
+              return here with Sheets enabled. On read-only hosts (e.g. Vercel),
               either set server env <code className="rounded bg-amber-100 px-1">SUPABASE_SERVICE_ROLE_KEY</code> and
               run the <code className="rounded bg-amber-100 px-1">workspace_google_sheets_oauth</code> migration so the
               token is stored in Supabase (no pasted token), or set{" "}
