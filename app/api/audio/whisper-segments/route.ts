@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { postProcessLessonTimedSegments, type LessonTimedSegment } from "@/lib/dialogue-segment-merge";
+import { refineBackchannelBoundsWithWords } from "@/lib/reaction-backchannel";
 import { groqTranscriptionVerboseBundle } from "@/lib/groq-whisper-transcription";
 import { isGroqConfigured } from "@/lib/groq-openai";
 import { splitLessonSegmentsByJlptWordCuts, type TranscribedWord } from "@/lib/jlpt-listening-number-split";
@@ -111,6 +112,10 @@ export async function POST(req: Request) {
       merged = postProcessLessonTimedSegments(preMerged);
     } else {
       merged = raw;
+    }
+
+    if (words && words.length > 0) {
+      merged = refineBackchannelBoundsWithWords(merged, words);
     }
 
     const filtered = merged.filter((s) => s.endSec > s.startSec && s.endSec - s.startSec >= 0.02);

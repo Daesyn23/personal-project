@@ -22,7 +22,8 @@ export function snapSegmentsToNonOverlappingSlices(
   const maxEx = Math.max(0, Math.floor(maxSampleExclusive));
   if (maxEx === 0) return segments;
 
-  const minSamples = Math.max(1, Math.floor(sampleRate * 0.02));
+  /** When timestamps collapse, grow by at most ~4ms; cap by gap so short reactions are not zeroed. */
+  const maxRepairSamples = Math.max(1, Math.floor(sampleRate * 0.004));
   let prevEndExclusive = 0;
   const out: AudioSegmentRange[] = [];
 
@@ -33,25 +34,27 @@ export function snapSegmentsToNonOverlappingSlices(
 
     const startSample = Math.max(rawStart, prevEndExclusive);
 
+    const nextStartFloor =
+      i + 1 < segments.length
+        ? Math.max(0, Math.min(maxEx, Math.floor(segments[i + 1]!.startSec * sampleRate)))
+        : maxEx;
+
     let endExclusive: number;
     if (i + 1 < segments.length) {
-      const nextStartFloor = Math.max(
-        0,
-        Math.min(maxEx, Math.floor(segments[i + 1]!.startSec * sampleRate))
-      );
       endExclusive = Math.min(rawEndExclusive, Math.max(startSample + 1, nextStartFloor));
     } else {
       endExclusive = Math.min(maxEx, Math.max(startSample + 1, rawEndExclusive));
     }
 
     if (endExclusive <= startSample) {
-      endExclusive = Math.min(maxEx, startSample + minSamples);
-      if (i + 1 < segments.length) {
-        const nextStartFloor = Math.max(
-          0,
-          Math.min(maxEx, Math.floor(segments[i + 1]!.startSec * sampleRate))
-        );
-        endExclusive = Math.min(endExclusive, Math.max(startSample + 1, nextStartFloor));
+      const gapSamples = Math.max(0, nextStartFloor - startSample);
+      const repairSamples = Math.min(
+        maxRepairSamples,
+        Math.max(1, gapSamples > 1 ? gapSamples - 1 : 1)
+      );
+      endExclusive = Math.min(maxEx, startSample + repairSamples);
+      if (i + 1 < segments.length && nextStartFloor > startSample) {
+        endExclusive = Math.min(endExclusive, nextStartFloor);
       }
     }
 
@@ -67,6 +70,46 @@ export function snapSegmentsToNonOverlappingSlices(
   }
 
   return out;
+}
+
+/**
+ * Extends each segment's end slightly for playback so ASR tails are not clipped.
+ * Uses **sample-accurate** caps so {@link sliceAudioBuffer} never pulls in the next segment’s audio
+ * (guards a few samples before the next segment’s start).
+ */
+export function extendSegmentEndsForPlayback(
+  segments: AudioSegmentRange[],
+  sampleRate: number,
+  durationSec: number,
+  tailPadSec = 0.048,
+  options?: { shortPhraseMaxSec?: number; shortPhraseTailPadSec?: number }
+): AudioSegmentRange[] {
+  if (segments.length === 0 || tailPadSec <= 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return segments;
+  }
+  const durSm = Math.max(0, Math.floor(durationSec * sampleRate));
+  const defaultPadSm = Math.max(1, Math.floor(tailPadSec * sampleRate));
+  const shortMaxSec = options?.shortPhraseMaxSec ?? 0.45;
+  const shortPadSec = options?.shortPhraseTailPadSec ?? 0.076;
+  const shortPadSm = Math.max(defaultPadSm, Math.floor(shortPadSec * sampleRate));
+  /** Leave this many samples before the next segment’s first sample (prevents next clip bleeding in). */
+  const guardSm = Math.max(2, Math.ceil(sampleRate * 0.004));
+  const n = segments.length;
+
+  return segments.map((s, i) => {
+    const startSm = Math.max(0, Math.min(durSm, Math.floor(s.startSec * sampleRate)));
+    const curEndExcSm = Math.max(startSm + 1, Math.min(durSm, Math.ceil(s.endSec * sampleRate)));
+    const phraseDurSec = (curEndExcSm - startSm) / sampleRate;
+    const padSm = phraseDurSec < shortMaxSec ? shortPadSm : defaultPadSm;
+    const nextStartSm =
+      i + 1 < n
+        ? Math.max(0, Math.min(durSm, Math.floor(segments[i + 1]!.startSec * sampleRate)))
+        : durSm;
+    const maxExclusiveSm = Math.max(startSm + 1, Math.min(durSm, nextStartSm - guardSm));
+    const paddedExclusiveSm = Math.min(curEndExcSm + padSm, Math.max(curEndExcSm, maxExclusiveSm));
+    const endSec = (paddedExclusiveSm - 0.5) / sampleRate;
+    return { startSec: s.startSec, endSec };
+  });
 }
 
 export type SilenceSegmentOptions = {
@@ -475,8 +518,11 @@ export function findSegmentsFromMono(
 
 export function sliceAudioBuffer(source: AudioBuffer, startSec: number, endSec: number): AudioBuffer {
   const sr = source.sampleRate;
-  const start = Math.min(Math.max(0, Math.floor(startSec * sr)), source.length);
-  const end = Math.min(Math.max(start, Math.ceil(endSec * sr)), source.length);
+  const lenSrc = source.length;
+  let start = Math.min(Math.max(0, Math.floor(startSec * sr)), lenSrc);
+  let end = Math.min(Math.max(0, Math.ceil(endSec * sr)), lenSrc);
+  if (end <= start) end = Math.min(lenSrc, start + 1);
+  start = Math.min(start, Math.max(0, end - 1));
   const len = end - start;
   const out = new AudioBuffer({
     length: len,

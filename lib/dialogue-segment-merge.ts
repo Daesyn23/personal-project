@@ -4,6 +4,7 @@
  */
 
 import { nextStartsNumberedListeningPrompt } from "@/lib/jlpt-listening-number-split";
+import { looksLikeStandaloneBackchannel } from "@/lib/reaction-backchannel";
 
 export type LessonTimedSegment = {
   startSec: number;
@@ -178,6 +179,13 @@ export function smartSectionWhisperFragments(segments: LessonTimedSegment[]): Le
       else if (!soft && !cont && gap >= 0.52) split = true;
     } else if (accDur >= 11 && gap >= 0.28 && !cont) {
       /* Avoid run-on monologue chunks */
+      split = true;
+    }
+
+    if (
+      looksLikeStandaloneBackchannel(acc.text.trim()) ||
+      looksLikeStandaloneBackchannel(next.text.trim())
+    ) {
       split = true;
     }
 

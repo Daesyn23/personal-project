@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   encodeAudioBufferToWav,
+  extendSegmentEndsForPlayback,
   sliceAudioBuffer,
   snapSegmentsToNonOverlappingSlices,
   type AudioSegmentRange,
@@ -30,6 +31,27 @@ function clampAudioSegments(segments: AudioSegmentRange[], maxSec: number): Audi
       endSec: Math.max(0, Math.min(s.endSec, maxSec)),
     }))
     .filter((s) => s.endSec - s.startSec > 0.02);
+}
+
+type InterPartPauseWhen = "every_part" | "speaker_change";
+
+function shouldPauseBetweenPhraseParts(
+  currentIndex: number,
+  opts: {
+    clipCount: number;
+    enabled: boolean;
+    when: InterPartPauseWhen;
+    pauseMs: number;
+    speakers: string[];
+  }
+): boolean {
+  if (!opts.enabled || opts.pauseMs <= 0) return false;
+  if (currentIndex + 1 >= opts.clipCount) return false;
+  if (opts.when === "every_part") return true;
+  const a = opts.speakers[currentIndex]?.trim() ?? "";
+  const b = opts.speakers[currentIndex + 1]?.trim() ?? "";
+  if (!a && !b) return true;
+  return a !== b;
 }
 
 /** Aligns each phrase line with the same clamp/filter rules as `clampAudioSegments`. */
@@ -142,17 +164,42 @@ function FullSourceAudioBar({
   nominalDurationSec,
   disabled,
   onTimeSec,
+  timelineMirrorSec,
+  exportAudioRef,
 }: {
   audioUrl: string;
   nominalDurationSec: number;
   disabled?: boolean;
   onTimeSec?: (t: number) => void;
+  /**
+   * When set (e.g. sequential phrase playback), the scrubber reflects this time on the full file
+   * and the hidden audio is paused so it does not fight the phrase player.
+   */
+  timelineMirrorSec?: number | null;
+  exportAudioRef?: React.MutableRefObject<HTMLAudioElement | null>;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [positionSec, setPositionSec] = useState(0);
   const [durationSec, setDurationSec] = useState(nominalDurationSec);
+
+  const setAudioEl = useCallback(
+    (el: HTMLAudioElement | null) => {
+      audioRef.current = el;
+      if (exportAudioRef) exportAudioRef.current = el;
+    },
+    [exportAudioRef]
+  );
+
+  const mirrorActive =
+    timelineMirrorSec != null && Number.isFinite(timelineMirrorSec) && timelineMirrorSec >= 0;
+
+  useEffect(() => {
+    if (mirrorActive) {
+      audioRef.current?.pause();
+    }
+  }, [mirrorActive]);
 
   useEffect(() => {
     setDurationSec(nominalDurationSec);
@@ -194,8 +241,11 @@ function FullSourceAudioBar({
   }, [audioUrl, onTimeSec]);
 
   const cap = durationSec > 0 ? durationSec : nominalDurationSec;
+  const shownSec = mirrorActive ? Math.min(cap, timelineMirrorSec!) : positionSec;
+  const progressPct = cap > 0 ? Math.min(100, (shownSec / cap) * 100) : 0;
 
   const seekFromClientX = (clientX: number) => {
+    if (mirrorActive || disabled) return;
     const tr = trackRef.current;
     const el = audioRef.current;
     if (!tr || !el || disabled) return;
@@ -207,27 +257,28 @@ function FullSourceAudioBar({
   };
 
   const skip = (delta: number) => {
+    if (mirrorActive || disabled) return;
     const el = audioRef.current;
-    if (!el || disabled) return;
+    if (!el) return;
     el.currentTime = Math.max(0, Math.min(cap, el.currentTime + delta));
     setPositionSec(el.currentTime);
     onTimeSec?.(el.currentTime);
   };
 
   const toggle = () => {
+    if (mirrorActive || disabled) return;
     const el = audioRef.current;
-    if (!el || disabled) return;
+    if (!el) return;
     if (playing) el.pause();
     else void el.play().catch(() => {});
   };
 
-  const progressPct = cap > 0 ? Math.min(100, (positionSec / cap) * 100) : 0;
   const btnBase =
     "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-pink-200/90 bg-white text-pink-800 shadow-sm transition hover:border-violet-300 hover:bg-violet-50/80 hover:text-violet-900 disabled:opacity-35";
 
   return (
     <div className="space-y-2">
-      <audio ref={audioRef} src={audioUrl} preload="metadata" className="hidden" aria-hidden />
+      <audio ref={setAudioEl} src={audioUrl} preload="metadata" className="hidden" aria-hidden />
       <div
         className={`rounded-xl border border-pink-100/90 bg-gradient-to-r from-pink-50/70 via-white to-violet-50/60 p-2 shadow-inner shadow-pink-100/30 ${
           disabled ? "pointer-events-none opacity-45" : ""
@@ -235,8 +286,19 @@ function FullSourceAudioBar({
         role="group"
         aria-label="Full file playback"
       >
+        {mirrorActive ? (
+          <p className="mb-1.5 rounded-md bg-violet-50/90 px-2 py-1 text-center text-[10px] font-medium text-violet-800">
+            Timeline synced with phrase playback below
+          </p>
+        ) : null}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          <button type="button" className={btnBase} aria-label="Rewind 5 seconds" onClick={() => skip(-5)}>
+          <button
+            type="button"
+            className={btnBase}
+            aria-label="Rewind 5 seconds"
+            disabled={disabled || mirrorActive}
+            onClick={() => skip(-5)}
+          >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <path d="M11 18V6l-8 6 8 6zm11 0V6l-8 6 8 6z" />
             </svg>
@@ -246,7 +308,7 @@ function FullSourceAudioBar({
             className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-b from-violet-600 to-pink-600 text-white shadow-md shadow-violet-300/40 transition hover:from-violet-700 hover:to-pink-700 disabled:opacity-40"
             aria-label={playing ? "Pause" : "Play"}
             onClick={toggle}
-            disabled={disabled}
+            disabled={disabled || mirrorActive}
           >
             {playing ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -259,7 +321,13 @@ function FullSourceAudioBar({
               </svg>
             )}
           </button>
-          <button type="button" className={btnBase} aria-label="Forward 5 seconds" onClick={() => skip(5)}>
+          <button
+            type="button"
+            className={btnBase}
+            aria-label="Forward 5 seconds"
+            disabled={disabled || mirrorActive}
+            onClick={() => skip(5)}
+          >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <path d="M13 6v12l8-6-8-6zm-11 0v12l8-6-8-6z" />
             </svg>
@@ -268,13 +336,14 @@ function FullSourceAudioBar({
             <div
               ref={trackRef}
               role="slider"
-              tabIndex={0}
+              tabIndex={mirrorActive ? -1 : 0}
               aria-valuemin={0}
               aria-valuemax={Math.round(cap * 1000)}
-              aria-valuenow={Math.round(positionSec * 1000)}
-              className="h-2 cursor-pointer overflow-hidden rounded-full bg-violet-100/90"
+              aria-valuenow={Math.round(shownSec * 1000)}
+              className={`h-2 overflow-hidden rounded-full bg-violet-100/90 ${mirrorActive ? "cursor-default opacity-80" : "cursor-pointer"}`}
               onClick={(e) => seekFromClientX(e.clientX)}
               onKeyDown={(e) => {
+                if (mirrorActive) return;
                 if (e.key === "ArrowRight") {
                   e.preventDefault();
                   skip(2);
@@ -290,7 +359,7 @@ function FullSourceAudioBar({
               />
             </div>
             <p className="mt-1 text-center text-[11px] tabular-nums text-neutral-500 sm:text-xs">
-              {formatClock(positionSec)} / {formatClock(cap)}
+              {formatClock(shownSec)} / {formatClock(cap)}
             </p>
           </div>
         </div>
@@ -473,10 +542,214 @@ function PartAudioControls({
   );
 }
 
+/** Shared “play all Whisper segments” transport; natural-pause controls only in Listen first (`showNaturalPauses`). */
+function SequentialPartsPlaybackControls({
+  idPrefix,
+  showNaturalPauses,
+  interPartPauseEnabled,
+  setInterPartPauseEnabled,
+  interPartPauseWhen,
+  setInterPartPauseWhen,
+  interPartPauseMs,
+  setInterPartPauseMs,
+  clipUrlsLength,
+  queueSession,
+  queuePlaying,
+  queueIndex,
+  queuePositionSec,
+  queueClipDurationSec,
+  queueProgressPct,
+  queueGoPrevPart,
+  queueGoNextPart,
+  queueSkipSeconds,
+  toggleQueuePlayback,
+  stopQueue,
+}: {
+  idPrefix: string;
+  showNaturalPauses: boolean;
+  interPartPauseEnabled: boolean;
+  setInterPartPauseEnabled: (v: boolean) => void;
+  interPartPauseWhen: InterPartPauseWhen;
+  setInterPartPauseWhen: (v: InterPartPauseWhen) => void;
+  interPartPauseMs: number;
+  setInterPartPauseMs: (v: number) => void;
+  clipUrlsLength: number;
+  queueSession: boolean;
+  queuePlaying: boolean;
+  queueIndex: number;
+  queuePositionSec: number;
+  queueClipDurationSec: number;
+  queueProgressPct: number;
+  queueGoPrevPart: () => void;
+  queueGoNextPart: () => void;
+  queueSkipSeconds: (delta: number) => void;
+  toggleQueuePlayback: () => void;
+  stopQueue: () => void;
+}) {
+  const idWhen = `${idPrefix}-inter-pause-when`;
+  const idMs = `${idPrefix}-inter-pause-ms`;
+  return (
+    <>
+      {showNaturalPauses ? (
+        <div className="rounded-lg border border-violet-100 bg-white/90 px-2.5 py-2">
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-violet-300 text-violet-700 focus:ring-violet-400"
+              checked={interPartPauseEnabled}
+              onChange={(e) => setInterPartPauseEnabled(e.target.checked)}
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold text-neutral-800">Natural pauses</span>
+              <span className="mt-0.5 block text-[11px] leading-snug text-neutral-500">
+                Short silence between segments. Uncheck to play clips back-to-back with no extra gap.
+              </span>
+            </span>
+          </label>
+          {interPartPauseEnabled ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-violet-100/80 pt-2">
+              <label htmlFor={idWhen} className="sr-only">
+                When to pause
+              </label>
+              <select
+                id={idWhen}
+                value={interPartPauseWhen}
+                onChange={(e) => setInterPartPauseWhen(e.target.value as InterPartPauseWhen)}
+                className="min-w-0 flex-1 rounded-md border border-violet-200 bg-white px-2 py-1 text-[11px] font-medium text-neutral-800 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-200"
+              >
+                <option value="every_part">After every part</option>
+                <option value="speaker_change">Only when speaker changes</option>
+              </select>
+              <label htmlFor={idMs} className="sr-only">
+                Pause length
+              </label>
+              <select
+                id={idMs}
+                value={interPartPauseMs}
+                onChange={(e) => setInterPartPauseMs(Number(e.target.value))}
+                className="rounded-md border border-violet-200 bg-white px-2 py-1 text-[11px] font-medium tabular-nums text-neutral-800 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-200"
+              >
+                <option value={150}>0.15s gap</option>
+                <option value={300}>0.3s gap</option>
+                <option value={350}>0.35s gap</option>
+                <option value={450}>0.45s gap</option>
+                <option value={600}>0.6s gap</option>
+                <option value={900}>0.9s gap</option>
+                <option value={1200}>1.2s gap</option>
+              </select>
+            </div>
+          ) : null}
+          {interPartPauseEnabled && interPartPauseWhen === "speaker_change" ? (
+            <p className="mt-1.5 text-[10px] leading-snug text-neutral-500">
+              Uses per-part speaker labels when present. If none are set, pauses after every part.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <div
+        className="rounded-2xl border border-violet-200/90 bg-gradient-to-br from-violet-50/90 via-white to-pink-50/70 p-3 shadow-inner shadow-violet-100/40"
+        role="group"
+        aria-label="Sequential playback for all phrase clips"
+      >
+        <div className="flex flex-wrap items-center justify-center gap-1">
+          <button
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-violet-200/90 bg-white text-violet-900 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/80 disabled:opacity-35"
+            aria-label="Previous part"
+            disabled={clipUrlsLength === 0 || !queueSession || queueIndex === 0}
+            onClick={queueGoPrevPart}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M8 5v14l11-7-11-7zM6 5h2v14H6V5z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-violet-200/90 bg-white text-violet-900 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/80 disabled:opacity-35"
+            aria-label="Rewind 5 seconds"
+            disabled={clipUrlsLength === 0 || !queueSession}
+            onClick={() => queueSkipSeconds(-5)}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M11 18V6l-8 6 8 6zm11 0V6l-8 6 8 6z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-b from-violet-600 to-pink-600 text-white shadow-lg shadow-violet-300/35 transition hover:from-violet-700 hover:to-pink-700 disabled:opacity-40"
+            aria-label={queueSession && queuePlaying ? "Pause" : "Play all parts"}
+            disabled={clipUrlsLength === 0}
+            onClick={toggleQueuePlayback}
+          >
+            {queueSession && queuePlaying ? (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <rect x="6" y="5" width="4" height="14" rx="1" />
+                <rect x="14" y="5" width="4" height="14" rx="1" />
+              </svg>
+            ) : (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="ml-0.5">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            )}
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-violet-200/90 bg-white text-violet-900 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/80 disabled:opacity-35"
+            aria-label="Forward 5 seconds"
+            disabled={clipUrlsLength === 0 || !queueSession}
+            onClick={() => queueSkipSeconds(5)}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M13 6v12l8-6-8-6zm-11 0v12l8-6-8-6z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-violet-200/90 bg-white text-violet-900 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/80 disabled:opacity-35"
+            aria-label="Next part"
+            disabled={clipUrlsLength === 0 || !queueSession || queueIndex >= clipUrlsLength - 1}
+            onClick={queueGoNextPart}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M16 5v14l-11-7 11-7zM18 5h2v14h-2V5z" />
+            </svg>
+          </button>
+        </div>
+        <div className="mt-3 px-0.5">
+          <div className="h-2 overflow-hidden rounded-full bg-violet-100/90">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-violet-600 via-pink-500 to-rose-400 transition-[width] duration-100 ease-linear"
+              style={{ width: `${queueProgressPct}%` }}
+            />
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1 text-[11px] tabular-nums text-neutral-600">
+            <span>
+              {queueSession ? `Part ${queueIndex + 1} / ${clipUrlsLength}` : `${clipUrlsLength} parts ready`}
+            </span>
+            <span>
+              {formatClock(queuePositionSec)} / {formatClock(queueClipDurationSec > 0 ? queueClipDurationSec : 0)}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={stopQueue}
+          disabled={!queueSession}
+          className="mt-3 w-full rounded-lg border border-pink-200/90 bg-pink-50/70 py-2 text-xs font-semibold text-pink-900 shadow-sm transition hover:bg-pink-100 disabled:opacity-40"
+        >
+          Stop & reset
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function WorkspaceAudioLessonSection() {
   const inputRef = useRef<HTMLInputElement>(null);
   const seqAudioRef = useRef<HTMLAudioElement | null>(null);
   const seqLoadedSrcRef = useRef<string | null>(null);
+  /** Listen-first full file `<audio>` — paused when phrase queue plays so only one stream runs. */
+  const fullSourceLessonAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const [mainTab, setMainTab] = useState<MainTab>("library");
   const [libraryLessons, setLibraryLessons] = useState<AudioLessonRow[]>([]);
@@ -518,7 +791,29 @@ export function WorkspaceAudioLessonSection() {
   /** Transport: whether the sequential player is currently playing (vs paused in-session). */
   const [queuePlaying, setQueuePlaying] = useState(false);
   const [queueIndex, setQueueIndex] = useState(0);
+  const queueIndexRef = useRef(0);
+  queueIndexRef.current = queueIndex;
   const [queuePositionSec, setQueuePositionSec] = useState(0);
+  /** Brief silence between phrase clips so dense dialogue sounds more natural. */
+  const [interPartPauseEnabled, setInterPartPauseEnabled] = useState(false);
+  const [interPartPauseWhen, setInterPartPauseWhen] = useState<InterPartPauseWhen>("every_part");
+  const [interPartPauseMs, setInterPartPauseMs] = useState(450);
+
+  const interPartPauseTimerRef = useRef<number | null>(null);
+  const queuePlaybackOptsRef = useRef({
+    clipCount: 0,
+    enabled: false,
+    when: "every_part" as InterPartPauseWhen,
+    pauseMs: 450,
+    speakers: [] as string[],
+  });
+
+  const clearInterPartPauseTimer = useCallback(() => {
+    if (interPartPauseTimerRef.current !== null) {
+      window.clearTimeout(interPartPauseTimerRef.current);
+      interPartPauseTimerRef.current = null;
+    }
+  }, []);
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameRow, setRenameRow] = useState<AudioLessonRow | null>(null);
@@ -558,13 +853,42 @@ export function WorkspaceAudioLessonSection() {
   const displaySegments = useMemo(() => {
     if (!decodedBuffer || !whisperSegments?.length) return [];
     const clamped = clampAudioSegments(whisperSegments, decodedBuffer.duration);
-    return snapSegmentsToNonOverlappingSlices(clamped, decodedBuffer.sampleRate, decodedBuffer.length);
+    const snapped = snapSegmentsToNonOverlappingSlices(clamped, decodedBuffer.sampleRate, decodedBuffer.length);
+    return extendSegmentEndsForPlayback(snapped, decodedBuffer.sampleRate, decodedBuffer.duration, 0.048, {
+      shortPhraseMaxSec: 0.48,
+      shortPhraseTailPadSec: 0.078,
+    });
   }, [decodedBuffer, whisperSegments]);
+
+  const phraseQueueMirrorFullSec = useMemo(() => {
+    if (!queueSession || displaySegments.length === 0) return null;
+    const seg = displaySegments[queueIndex];
+    if (!seg) return null;
+    const cap = decodedBuffer?.duration ?? seg.endSec;
+    return Math.min(cap, seg.startSec + Math.max(0, queuePositionSec));
+  }, [queueSession, queueIndex, queuePositionSec, displaySegments, decodedBuffer?.duration]);
+
+  useEffect(() => {
+    if (phraseQueueMirrorFullSec == null) return;
+    setFullListenSec(phraseQueueMirrorFullSec);
+  }, [phraseQueueMirrorFullSec]);
+
+  useEffect(() => {
+    if (queueSession && queuePlaying) {
+      fullSourceLessonAudioRef.current?.pause();
+    }
+  }, [queueSession, queuePlaying]);
 
   const currentLessonBaseline = useMemo(
     () =>
-      serializeLessonBaseline(lessonTitle, lessonFilename, phraseTexts, phraseSpeakers, displaySegments),
-    [lessonTitle, lessonFilename, phraseTexts, phraseSpeakers, displaySegments]
+      serializeLessonBaseline(
+        lessonTitle,
+        lessonFilename,
+        phraseTexts,
+        phraseSpeakers,
+        whisperSegments ?? []
+      ),
+    [lessonTitle, lessonFilename, phraseTexts, phraseSpeakers, whisperSegments]
   );
 
   const lessonHasUnsavedChanges =
@@ -574,7 +898,7 @@ export function WorkspaceAudioLessonSection() {
   useEffect(() => {
     if (lessonBaselineNonce === 0) return;
     setCommittedLessonBaseline(
-      serializeLessonBaseline(lessonTitle, lessonFilename, phraseTexts, phraseSpeakers, displaySegments)
+      serializeLessonBaseline(lessonTitle, lessonFilename, phraseTexts, phraseSpeakers, whisperSegments ?? [])
     );
     // Intentionally only when opening from library (nonce bump), not on every field change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -596,7 +920,7 @@ export function WorkspaceAudioLessonSection() {
 
   useEffect(() => {
     const urls: string[] = [];
-    if (decodedBuffer && displaySegments.length > 0 && useLessonPhraseDivision) {
+    if (decodedBuffer && displaySegments.length > 0) {
       for (const seg of displaySegments) {
         const sliced = sliceAudioBuffer(decodedBuffer, seg.startSec, seg.endSec);
         const wav = encodeAudioBufferToWav(sliced);
@@ -607,7 +931,24 @@ export function WorkspaceAudioLessonSection() {
     return () => {
       urls.forEach(URL.revokeObjectURL);
     };
-  }, [decodedBuffer, displaySegments, useLessonPhraseDivision]);
+  }, [decodedBuffer, displaySegments]);
+
+  useEffect(() => {
+    queuePlaybackOptsRef.current = {
+      clipCount: clipUrls.length,
+      enabled: interPartPauseEnabled && !useLessonPhraseDivision,
+      when: interPartPauseWhen,
+      pauseMs: interPartPauseMs,
+      speakers: phraseSpeakers,
+    };
+  }, [
+    clipUrls.length,
+    interPartPauseEnabled,
+    interPartPauseWhen,
+    interPartPauseMs,
+    phraseSpeakers,
+    useLessonPhraseDivision,
+  ]);
 
   useEffect(() => {
     if (!decodedBuffer) {
@@ -633,6 +974,7 @@ export function WorkspaceAudioLessonSection() {
 
     if (!queueSession) {
       el.pause();
+      clearInterPartPauseTimer();
       seqLoadedSrcRef.current = null;
       setQueuePositionSec(0);
       return;
@@ -648,14 +990,25 @@ export function WorkspaceAudioLessonSection() {
     }
 
     const onEnded = () => {
-      setQueueIndex((i) => {
-        if (i + 1 < clipUrls.length) return i + 1;
+      clearInterPartPauseTimer();
+      const opts = queuePlaybackOptsRef.current;
+      const i = queueIndexRef.current;
+      if (i + 1 >= opts.clipCount) {
         setQueueSession(false);
         setQueuePlaying(false);
         seqLoadedSrcRef.current = null;
         setQueuePositionSec(0);
-        return 0;
-      });
+        setQueueIndex(0);
+        return;
+      }
+      if (shouldPauseBetweenPhraseParts(i, opts)) {
+        interPartPauseTimerRef.current = window.setTimeout(() => {
+          interPartPauseTimerRef.current = null;
+          setQueueIndex(i + 1);
+        }, opts.pauseMs);
+        return;
+      }
+      setQueueIndex(i + 1);
     };
 
     const onTime = () => setQueuePositionSec(el.currentTime);
@@ -670,18 +1023,20 @@ export function WorkspaceAudioLessonSection() {
     }
 
     return () => {
+      clearInterPartPauseTimer();
       el.removeEventListener("ended", onEnded);
       el.removeEventListener("timeupdate", onTime);
     };
-  }, [queueSession, queuePlaying, queueIndex, clipUrls]);
+  }, [queueSession, queuePlaying, queueIndex, clipUrls, clearInterPartPauseTimer]);
 
   useEffect(() => {
+    clearInterPartPauseTimer();
     setQueueSession(false);
     setQueuePlaying(false);
     setQueueIndex(0);
     setQueuePositionSec(0);
     seqLoadedSrcRef.current = null;
-  }, [displaySegments]);
+  }, [displaySegments, clearInterPartPauseTimer]);
 
   const phraseTextsKey = phraseTexts.join("\u0000");
   const whisperWordsReadingKey = whisperWords?.map((w) => w.word).join("\u0000") ?? "";
@@ -1027,10 +1382,10 @@ export function WorkspaceAudioLessonSection() {
   );
 
   const persistLesson = useCallback(async () => {
-    if (!decodedBuffer || !sourceFile || !sourceName || displaySegments.length === 0) return;
+    if (!decodedBuffer || !sourceFile || !sourceName || !whisperSegments?.length) return;
     setSaveStatus("saving");
     try {
-      const payload: AudioLessonSegment[] = displaySegments.map((s, i) => ({
+      const payload: AudioLessonSegment[] = (whisperSegments ?? []).map((s, i) => ({
         startSec: s.startSec,
         endSec: s.endSec,
         text: phraseTexts[i]?.trim() || undefined,
@@ -1068,7 +1423,7 @@ export function WorkspaceAudioLessonSection() {
           lessonFilename.trim() || sourceName || "audio",
           phraseTexts,
           phraseSpeakers,
-          displaySegments
+          whisperSegments ?? []
         )
       );
       setSaveStatus("saved");
@@ -1077,7 +1432,7 @@ export function WorkspaceAudioLessonSection() {
     } catch {
       setSaveStatus("error");
     }
-  }, [decodedBuffer, sourceFile, sourceName, displaySegments, phraseTexts, phraseSpeakers, lessonTitle, lessonFilename, lessonId, useLessonPhraseDivision]);
+  }, [decodedBuffer, sourceFile, sourceName, whisperSegments, phraseTexts, phraseSpeakers, lessonTitle, lessonFilename, lessonId, useLessonPhraseDivision]);
 
   const resetLesson = useCallback(() => {
     setLessonId(null);
@@ -1107,8 +1462,9 @@ export function WorkspaceAudioLessonSection() {
     setHiraganaWordReadingError(null);
     setCommittedLessonBaseline(null);
     setLessonBaselineNonce(0);
+    clearInterPartPauseTimer();
     if (inputRef.current) inputRef.current.value = "";
-  }, []);
+  }, [clearInterPartPauseTimer]);
 
   const removeLesson = useCallback(
     async (row: AudioLessonRow) => {
@@ -1124,36 +1480,44 @@ export function WorkspaceAudioLessonSection() {
   );
 
   const stopQueue = useCallback(() => {
+    clearInterPartPauseTimer();
     setQueueSession(false);
     setQueuePlaying(false);
     setQueueIndex(0);
     setQueuePositionSec(0);
     seqAudioRef.current?.pause();
     seqLoadedSrcRef.current = null;
-  }, []);
+  }, [clearInterPartPauseTimer]);
 
   const toggleQueuePlayback = useCallback(() => {
     if (clipUrls.length === 0) return;
     if (!queueSession) {
+      clearInterPartPauseTimer();
+      fullSourceLessonAudioRef.current?.pause();
       setQueueIndex(0);
       setQueueSession(true);
       setQueuePlaying(true);
       return;
     }
-    setQueuePlaying((p) => !p);
-  }, [clipUrls.length, queueSession]);
+    setQueuePlaying((p) => {
+      if (p) clearInterPartPauseTimer();
+      return !p;
+    });
+  }, [clipUrls.length, queueSession, clearInterPartPauseTimer]);
 
   const queueGoPrevPart = useCallback(() => {
     if (clipUrls.length === 0 || !queueSession) return;
+    clearInterPartPauseTimer();
     setQueueIndex((i) => Math.max(0, i - 1));
     setQueuePlaying(true);
-  }, [clipUrls.length, queueSession]);
+  }, [clipUrls.length, queueSession, clearInterPartPauseTimer]);
 
   const queueGoNextPart = useCallback(() => {
     if (clipUrls.length === 0 || !queueSession) return;
+    clearInterPartPauseTimer();
     setQueueIndex((i) => Math.min(clipUrls.length - 1, i + 1));
     setQueuePlaying(true);
-  }, [clipUrls.length, queueSession]);
+  }, [clipUrls.length, queueSession, clearInterPartPauseTimer]);
 
   const queueSkipSeconds = useCallback(
     (delta: number) => {
@@ -1589,8 +1953,45 @@ export function WorkspaceAudioLessonSection() {
                     nominalDurationSec={totalDurationSec}
                     disabled={whisperLoading}
                     onTimeSec={setFullListenSec}
+                    timelineMirrorSec={phraseQueueMirrorFullSec}
+                    exportAudioRef={fullSourceLessonAudioRef}
                   />
                 </div>
+
+                {displaySegments.length > 0 && clipUrls.length > 0 ? (
+                  <div className="mt-5 rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/60 to-white px-3 py-4 sm:px-4">
+                    <p className="text-xs font-semibold text-violet-900">Segmented playback</p>
+                    <p className="mt-1 text-[11px] leading-snug text-neutral-600">
+                      Plays each Whisper segment in order (same timing as the full file above).{" "}
+                      <span className="font-medium text-violet-800">Natural pauses</span> are only available here in
+                      Listen first — use the checkbox below to add a short gap between parts or speaker changes.
+                    </p>
+                    <div className="mt-3 flex flex-col gap-3">
+                      <SequentialPartsPlaybackControls
+                        idPrefix="audio-listen-first"
+                        showNaturalPauses
+                        interPartPauseEnabled={interPartPauseEnabled}
+                        setInterPartPauseEnabled={setInterPartPauseEnabled}
+                        interPartPauseWhen={interPartPauseWhen}
+                        setInterPartPauseWhen={setInterPartPauseWhen}
+                        interPartPauseMs={interPartPauseMs}
+                        setInterPartPauseMs={setInterPartPauseMs}
+                        clipUrlsLength={clipUrls.length}
+                        queueSession={queueSession}
+                        queuePlaying={queuePlaying}
+                        queueIndex={queueIndex}
+                        queuePositionSec={queuePositionSec}
+                        queueClipDurationSec={queueClipDurationSec}
+                        queueProgressPct={queueProgressPct}
+                        queueGoPrevPart={queueGoPrevPart}
+                        queueGoNextPart={queueGoNextPart}
+                        queueSkipSeconds={queueSkipSeconds}
+                        toggleQueuePlayback={toggleQueuePlayback}
+                        stopQueue={stopQueue}
+                      />
+                    </div>
+                  </div>
+                ) : null}
 
                 {(whisperWords && whisperWords.length > 0) || displaySegments.length > 0 ? (
                   <div className="mt-6 space-y-3">
@@ -1820,105 +2221,33 @@ export function WorkspaceAudioLessonSection() {
                   <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
                     Playback — all parts
                   </span>
-                  <div
-                    className="rounded-2xl border border-violet-200/90 bg-gradient-to-br from-violet-50/90 via-white to-pink-50/70 p-3 shadow-inner shadow-violet-100/40"
-                    role="group"
-                    aria-label="Sequential playback for all phrase clips"
-                  >
-                    <div className="flex flex-wrap items-center justify-center gap-1">
-                      <button
-                        type="button"
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-violet-200/90 bg-white text-violet-900 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/80 disabled:opacity-35"
-                        aria-label="Previous part"
-                        disabled={clipUrls.length === 0 || !queueSession || queueIndex === 0}
-                        onClick={queueGoPrevPart}
-                      >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                          <path d="M8 5v14l11-7-11-7zM6 5h2v14H6V5z" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-violet-200/90 bg-white text-violet-900 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/80 disabled:opacity-35"
-                        aria-label="Rewind 5 seconds"
-                        disabled={clipUrls.length === 0 || !queueSession}
-                        onClick={() => queueSkipSeconds(-5)}
-                      >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                          <path d="M11 18V6l-8 6 8 6zm11 0V6l-8 6 8 6z" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-b from-violet-600 to-pink-600 text-white shadow-lg shadow-violet-300/35 transition hover:from-violet-700 hover:to-pink-700 disabled:opacity-40"
-                        aria-label={queueSession && queuePlaying ? "Pause" : "Play all parts"}
-                        disabled={clipUrls.length === 0}
-                        onClick={toggleQueuePlayback}
-                      >
-                        {queueSession && queuePlaying ? (
-                          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                            <rect x="6" y="5" width="4" height="14" rx="1" />
-                            <rect x="14" y="5" width="4" height="14" rx="1" />
-                          </svg>
-                        ) : (
-                          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="ml-0.5">
-                            <path d="M8 5v14l11-7z" />
-                          </svg>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-violet-200/90 bg-white text-violet-900 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/80 disabled:opacity-35"
-                        aria-label="Forward 5 seconds"
-                        disabled={clipUrls.length === 0 || !queueSession}
-                        onClick={() => queueSkipSeconds(5)}
-                      >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                          <path d="M13 6v12l8-6-8-6zm-11 0v12l8-6-8-6z" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-violet-200/90 bg-white text-violet-900 shadow-sm transition hover:border-pink-300 hover:bg-pink-50/80 disabled:opacity-35"
-                        aria-label="Next part"
-                        disabled={
-                          clipUrls.length === 0 || !queueSession || queueIndex >= clipUrls.length - 1
-                        }
-                        onClick={queueGoNextPart}
-                      >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                          <path d="M16 5v14l-11-7 11-7zM18 5h2v14h-2V5z" />
-                        </svg>
-                      </button>
-                    </div>
-                    <div className="mt-3 px-0.5">
-                      <div className="h-2 overflow-hidden rounded-full bg-violet-100/90">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-violet-600 via-pink-500 to-rose-400 transition-[width] duration-100 ease-linear"
-                          style={{ width: `${queueProgressPct}%` }}
-                        />
-                      </div>
-                      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1 text-[11px] tabular-nums text-neutral-600">
-                        <span>
-                          {queueSession
-                            ? `Part ${queueIndex + 1} / ${clipUrls.length}`
-                            : `${clipUrls.length} parts ready`}
-                        </span>
-                        <span>
-                          {formatClock(queuePositionSec)} /{" "}
-                          {formatClock(queueClipDurationSec > 0 ? queueClipDurationSec : 0)}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={stopQueue}
-                      disabled={!queueSession}
-                      className="mt-3 w-full rounded-lg border border-pink-200/90 bg-pink-50/70 py-2 text-xs font-semibold text-pink-900 shadow-sm transition hover:bg-pink-100 disabled:opacity-40"
-                    >
-                      Stop & reset
-                    </button>
-                  </div>
+                  <p className="max-w-[min(22rem,100%)] text-[11px] leading-snug text-neutral-500">
+                    Plays each phrase clip in order. Optional <span className="font-medium text-neutral-700">natural pauses</span> between segments are only in{" "}
+                    <span className="font-medium text-neutral-700">Listen first</span> — upload audio, choose{" "}
+                    <span className="font-medium">Leave as it is</span>, transcribe, then use Segmented playback in that card.
+                  </p>
+                  <SequentialPartsPlaybackControls
+                    idPrefix="audio-lesson-parts"
+                    showNaturalPauses={false}
+                    interPartPauseEnabled={interPartPauseEnabled}
+                    setInterPartPauseEnabled={setInterPartPauseEnabled}
+                    interPartPauseWhen={interPartPauseWhen}
+                    setInterPartPauseWhen={setInterPartPauseWhen}
+                    interPartPauseMs={interPartPauseMs}
+                    setInterPartPauseMs={setInterPartPauseMs}
+                    clipUrlsLength={clipUrls.length}
+                    queueSession={queueSession}
+                    queuePlaying={queuePlaying}
+                    queueIndex={queueIndex}
+                    queuePositionSec={queuePositionSec}
+                    queueClipDurationSec={queueClipDurationSec}
+                    queueProgressPct={queueProgressPct}
+                    queueGoPrevPart={queueGoPrevPart}
+                    queueGoNextPart={queueGoNextPart}
+                    queueSkipSeconds={queueSkipSeconds}
+                    toggleQueuePlayback={toggleQueuePlayback}
+                    stopQueue={stopQueue}
+                  />
                   <p className="max-w-[18rem] text-xs leading-snug text-neutral-500">
                     Per-part players are below.
                   </p>
