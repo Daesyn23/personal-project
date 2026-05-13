@@ -603,9 +603,10 @@ export default function HomePage() {
         />
       )}
 
-      {bulkEditOpen && selectedCount > 0 && (
+      {bulkEditOpen && selectedCount > 0 && activeSetId && (
         <BulkEditFlashcardsModal
           key={`${activeSetId ?? "set"}-${bulkEditInstanceKey}`}
+          setId={activeSetId}
           cards={cards.filter((c) => selectedIds.has(c.id))}
           onClose={() => setBulkEditOpen(false)}
           onCardsRemoved={(ids) => {

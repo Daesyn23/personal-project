@@ -8,6 +8,8 @@ import {
   snapSegmentsToNonOverlappingSlices,
   type AudioSegmentRange,
 } from "@/lib/audio-silence-segment";
+import { insertLineBreaksForListeningPartDisplay } from "@/lib/jlpt-listening-number-split";
+import { splitTimedWordsByTranscriptLines } from "@/lib/manual-transcript-split";
 import {
   createAudioLesson,
   deleteAudioLesson,
@@ -834,6 +836,9 @@ export function WorkspaceAudioLessonSection() {
   /** Bumps after loading a lesson from library to snapshot baseline from that row. */
   const [lessonBaselineNonce, setLessonBaselineNonce] = useState(0);
 
+  const [manualSplitDraft, setManualSplitDraft] = useState("");
+  const [manualSplitPanelOpen, setManualSplitPanelOpen] = useState(false);
+
   const localOnly = usingLocalStorage();
 
   const refreshLibrary = useCallback(async () => {
@@ -1043,19 +1048,21 @@ export function WorkspaceAudioLessonSection() {
 
   const displayedPhraseLines = useMemo(() => {
     return phraseTexts.map((t, i) => {
-      const line = formatJapaneseForDisplay(t, japaneseDisplayMode, hiraganaReadings?.[i]);
+      const prepared = useLessonPhraseDivision ? insertLineBreaksForListeningPartDisplay(t) : t;
+      const line = formatJapaneseForDisplay(prepared, japaneseDisplayMode, hiraganaReadings?.[i]);
       const sp = phraseSpeakers[i]?.trim();
       if (!sp) return line;
       return `[${sp}] ${line}`;
     });
-  }, [phraseTexts, phraseSpeakers, japaneseDisplayMode, hiraganaReadings]);
+  }, [phraseTexts, phraseSpeakers, japaneseDisplayMode, hiraganaReadings, useLessonPhraseDivision]);
 
   const fullDisplayTranscript = useMemo(() => {
+    const sep = useLessonPhraseDivision ? "\n\n" : " ";
     return displayedPhraseLines
       .map((t) => t.trim())
       .filter(Boolean)
-      .join(" ");
-  }, [displayedPhraseLines]);
+      .join(sep);
+  }, [displayedPhraseLines, useLessonPhraseDivision]);
 
   useEffect(() => {
     if (japaneseDisplayMode !== "hiragana") {
@@ -1211,6 +1218,8 @@ export function WorkspaceAudioLessonSection() {
       setPhraseTexts([]);
       setPhraseSpeakers([]);
       setWhisperWords(null);
+      setManualSplitDraft("");
+      setManualSplitPanelOpen(false);
       setWhisperError(null);
       setCommittedLessonBaseline(null);
       setLessonBaselineNonce(0);
@@ -1242,6 +1251,8 @@ export function WorkspaceAudioLessonSection() {
         setPhraseTexts(row.segments.map((s) => s.text ?? ""));
         setPhraseSpeakers(row.segments.map((s) => s.speaker ?? ""));
         setWhisperWords(null);
+        setManualSplitDraft("");
+        setManualSplitPanelOpen(false);
         setUseLessonPhraseDivision(row.phrase_division !== "raw");
         await decodeBlob(blob, row.filename);
         setMainTab("lesson");
@@ -1267,6 +1278,8 @@ export function WorkspaceAudioLessonSection() {
       const division: "lesson" | "raw" = divisionOverride ?? (useLessonPhraseDivision ? "lesson" : "raw");
       setWhisperError(null);
       setWhisperWords(null);
+      setManualSplitDraft("");
+      setManualSplitPanelOpen(false);
       setWhisperLoading(true);
       try {
         const fd = new FormData();
@@ -1305,8 +1318,12 @@ export function WorkspaceAudioLessonSection() {
             parsed.push({ word, startSec, endSec: endRaw });
           }
           setWhisperWords(parsed.length > 0 ? parsed : null);
+          if (division === "raw" && parsed.length > 0) {
+            setManualSplitDraft(parsed.map((w) => w.word).join(""));
+          }
         } else {
           setWhisperWords(null);
+          setManualSplitDraft("");
         }
 
         const payload: AudioLessonSegment[] = snappedRanges.map((r, i) => ({
@@ -1374,6 +1391,8 @@ export function WorkspaceAudioLessonSection() {
         setPhraseTexts([]);
         setPhraseSpeakers([]);
         setWhisperWords(null);
+        setManualSplitDraft("");
+        setManualSplitPanelOpen(false);
       } finally {
         setWhisperLoading(false);
       }
@@ -1381,58 +1400,98 @@ export function WorkspaceAudioLessonSection() {
     [sourceFile, decodedBuffer, lessonTitle, sourceName, lessonFilename, lessonId, useLessonPhraseDivision]
   );
 
-  const persistLesson = useCallback(async () => {
-    if (!decodedBuffer || !sourceFile || !sourceName || !whisperSegments?.length) return;
-    setSaveStatus("saving");
-    try {
-      const payload: AudioLessonSegment[] = (whisperSegments ?? []).map((s, i) => ({
-        startSec: s.startSec,
-        endSec: s.endSec,
-        text: phraseTexts[i]?.trim() || undefined,
-        speaker: phraseSpeakers[i]?.trim() || undefined,
-      }));
-      const title = lessonTitle.trim() || sourceName;
-      const storedFileLabel = lessonFilename.trim() || sourceName || "audio";
-      if (lessonId) {
-        await updateAudioLesson(lessonId, {
-          title,
-          segments: payload,
-          filename: storedFileLabel,
-          phrase_division: useLessonPhraseDivision ? "lesson" : "raw",
-        });
-        const r = await getAudioLesson(lessonId);
-        if (r) setActiveLessonRow(r);
-      } else {
-        const id = await createAudioLesson({
-          file: sourceFile,
-          filename: storedFileLabel,
-          title,
-          durationSec: decodedBuffer.duration,
-          sampleRate: decodedBuffer.sampleRate,
-          numberOfChannels: decodedBuffer.numberOfChannels,
-          segments: payload,
-          phrase_division: useLessonPhraseDivision ? "lesson" : "raw",
-        });
-        setLessonId(id);
-        const r = await getAudioLesson(id);
-        if (r) setActiveLessonRow(r);
+  const persistLesson = useCallback(
+    async (snapshot?: { segments: AudioSegmentRange[]; phraseTexts: string[]; phraseSpeakers: string[] }) => {
+      const segments = snapshot?.segments ?? whisperSegments;
+      const texts = snapshot?.phraseTexts ?? phraseTexts;
+      const speakers = snapshot?.phraseSpeakers ?? phraseSpeakers;
+      if (!decodedBuffer || !sourceFile || !sourceName || !segments?.length) return;
+      setSaveStatus("saving");
+      try {
+        const payload: AudioLessonSegment[] = segments.map((s, i) => ({
+          startSec: s.startSec,
+          endSec: s.endSec,
+          text: texts[i]?.trim() || undefined,
+          speaker: speakers[i]?.trim() || undefined,
+        }));
+        const title = lessonTitle.trim() || sourceName;
+        const storedFileLabel = lessonFilename.trim() || sourceName || "audio";
+        if (lessonId) {
+          await updateAudioLesson(lessonId, {
+            title,
+            segments: payload,
+            filename: storedFileLabel,
+            phrase_division: useLessonPhraseDivision ? "lesson" : "raw",
+          });
+          const r = await getAudioLesson(lessonId);
+          if (r) setActiveLessonRow(r);
+        } else {
+          const id = await createAudioLesson({
+            file: sourceFile,
+            filename: storedFileLabel,
+            title,
+            durationSec: decodedBuffer.duration,
+            sampleRate: decodedBuffer.sampleRate,
+            numberOfChannels: decodedBuffer.numberOfChannels,
+            segments: payload,
+            phrase_division: useLessonPhraseDivision ? "lesson" : "raw",
+          });
+          setLessonId(id);
+          const r = await getAudioLesson(id);
+          if (r) setActiveLessonRow(r);
+        }
+        setCommittedLessonBaseline(
+          serializeLessonBaseline(
+            lessonTitle.trim() || sourceName || "",
+            lessonFilename.trim() || sourceName || "audio",
+            texts,
+            speakers,
+            segments
+          )
+        );
+        setSaveStatus("saved");
+        setLibraryBump((x) => x + 1);
+        setTimeout(() => setSaveStatus("idle"), 2000);
+      } catch {
+        setSaveStatus("error");
       }
-      setCommittedLessonBaseline(
-        serializeLessonBaseline(
-          lessonTitle.trim() || sourceName || "",
-          lessonFilename.trim() || sourceName || "audio",
-          phraseTexts,
-          phraseSpeakers,
-          whisperSegments ?? []
-        )
-      );
-      setSaveStatus("saved");
-      setLibraryBump((x) => x + 1);
-      setTimeout(() => setSaveStatus("idle"), 2000);
-    } catch {
-      setSaveStatus("error");
+    },
+    [
+      decodedBuffer,
+      sourceFile,
+      sourceName,
+      whisperSegments,
+      phraseTexts,
+      phraseSpeakers,
+      lessonTitle,
+      lessonFilename,
+      lessonId,
+      useLessonPhraseDivision,
+    ]
+  );
+
+  const applyManualTranscriptSplit = useCallback(() => {
+    if (!decodedBuffer || !whisperWords?.length) return;
+    const result = splitTimedWordsByTranscriptLines(whisperWords, manualSplitDraft, decodedBuffer.duration);
+    if (!result.ok) {
+      setWhisperError(result.error);
+      return;
     }
-  }, [decodedBuffer, sourceFile, sourceName, whisperSegments, phraseTexts, phraseSpeakers, lessonTitle, lessonFilename, lessonId, useLessonPhraseDivision]);
+    const payloadFrom = result.segments;
+    const snappedRanges = snapSegmentsToNonOverlappingSlices(
+      payloadFrom.map((s) => ({ startSec: s.startSec, endSec: s.endSec })),
+      decodedBuffer.sampleRate,
+      decodedBuffer.length
+    );
+    const texts = snappedRanges.map((_, i) => (typeof payloadFrom[i]?.text === "string" ? payloadFrom[i]!.text : ""));
+    const speakers = texts.map(() => "");
+    setWhisperError(null);
+    setWhisperSegments(snappedRanges);
+    setPhraseTexts(texts);
+    setPhraseSpeakers(speakers);
+    setManualSplitPanelOpen(false);
+    void persistLesson({ segments: snappedRanges, phraseTexts: texts, phraseSpeakers: speakers });
+  }, [decodedBuffer, whisperWords, manualSplitDraft, persistLesson]);
 
   const resetLesson = useCallback(() => {
     setLessonId(null);
@@ -1448,6 +1507,8 @@ export function WorkspaceAudioLessonSection() {
     setPhraseSpeakers([]);
     setWhisperWords(null);
     setWhisperError(null);
+    setManualSplitDraft("");
+    setManualSplitPanelOpen(false);
     setDivisionPromptOpen(false);
     setUseLessonPhraseDivision(true);
     setQueueSession(false);
@@ -2131,7 +2192,81 @@ export function WorkspaceAudioLessonSection() {
                   >
                     Change split mode
                   </button>
+                  <button
+                    type="button"
+                    disabled={whisperLoading || !whisperWords?.length}
+                    title={
+                      whisperWords?.length
+                        ? "Split the lesson into phrases using line breaks in the transcript (timed words)."
+                        : "Transcribe first. Groq or OpenAI Whisper must return word-level timings — then this unlocks."
+                    }
+                    onClick={() => {
+                      if (!whisperWords?.length) return;
+                      setManualSplitPanelOpen((o) => !o);
+                    }}
+                    aria-expanded={manualSplitPanelOpen}
+                    className={`rounded-xl border px-4 py-2.5 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                      manualSplitPanelOpen
+                        ? "border-violet-400 bg-violet-100 text-violet-950"
+                        : "border-violet-300 bg-gradient-to-b from-violet-50 to-white text-violet-900 hover:border-violet-400 hover:bg-violet-50/90"
+                    }`}
+                  >
+                    {manualSplitPanelOpen ? "Hide manual split" : "Manual split"}
+                  </button>
                 </div>
+                {!whisperLoading && !whisperWords?.length ? (
+                  <p className="mt-2 text-xs leading-snug text-neutral-500">
+                    <span className="font-medium text-violet-800">Manual split</span> needs word-by-word timestamps from
+                    transcription (configure <span className="font-mono text-[11px]">GROQ_API_KEY</span> or{" "}
+                    <span className="font-mono text-[11px]">OPENAI_API_KEY</span>, then tap Transcribe again).
+                  </p>
+                ) : null}
+
+                {manualSplitPanelOpen && whisperWords && whisperWords.length > 0 ? (
+                  <div className="mt-4 rounded-xl border border-violet-200/90 bg-white/90 px-3 py-3 shadow-sm sm:px-4 sm:py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <h4 className="text-sm font-semibold text-violet-950">Phrase splits from transcript</h4>
+                      <p className="max-w-md text-xs text-neutral-500">
+                        Line breaks only; spaces ignored when matching timed words.
+                      </p>
+                    </div>
+                    <p className="mt-2 text-xs leading-relaxed text-neutral-600">
+                      Each line becomes one timed phrase. The joined text (ignoring spaces) must match the timed
+                      transcription exactly — use <span className="font-medium text-neutral-800">Reset from timed words</span>, then press{" "}
+                      <kbd className="rounded border border-neutral-200 bg-neutral-50 px-1 font-mono text-[10px]">Enter</kbd> where you want a new phrase.
+                    </p>
+                    <label htmlFor="audio-manual-split-draft" className="mt-2 block text-xs font-medium text-neutral-600">
+                      Transcript for splitting
+                    </label>
+                    <textarea
+                      id="audio-manual-split-draft"
+                      value={manualSplitDraft}
+                      onChange={(e) => setManualSplitDraft(e.target.value)}
+                      spellCheck={false}
+                      rows={8}
+                      className="mt-1.5 w-full resize-y rounded-lg border border-violet-100 bg-white px-2.5 py-2 font-mono text-[12px] leading-relaxed text-neutral-900 shadow-inner focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200/60"
+                      lang="ja"
+                    />
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={whisperLoading}
+                        onClick={() => setManualSplitDraft(whisperWords.map((w) => w.word).join(""))}
+                        className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm transition hover:bg-violet-50 disabled:opacity-50"
+                      >
+                        Reset from timed words
+                      </button>
+                      <button
+                        type="button"
+                        disabled={whisperLoading || !manualSplitDraft.trim()}
+                        onClick={() => void applyManualTranscriptSplit()}
+                        className="rounded-lg bg-gradient-to-r from-violet-600 to-pink-600 px-3 py-1.5 text-xs font-bold text-white shadow-md shadow-violet-300/25 transition hover:from-violet-700 hover:to-pink-700 disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        Apply phrase splits
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           )}
@@ -2150,6 +2285,22 @@ export function WorkspaceAudioLessonSection() {
                 >
                   Change
                 </button>
+              </p>
+            )}
+            {lessonReady && (
+              <p className="mt-2 border-t border-violet-200/60 pt-2 text-xs leading-snug text-neutral-600">
+                <span className="font-semibold text-violet-900">Manual split</span> lives in the{" "}
+                <span className="font-medium text-neutral-800">Listen first</span> card. Choose{" "}
+                <button
+                  type="button"
+                  className="font-semibold text-violet-800 underline decoration-violet-300 underline-offset-2 hover:text-violet-950"
+                  onClick={() => setDivisionPromptOpen(true)}
+                >
+                  Change split mode
+                </button>{" "}
+                → <span className="font-medium text-neutral-800">Leave as it is</span>, transcribe, then use{" "}
+                <span className="font-medium text-violet-900">Manual split</span> under the audio player (needs word-level
+                timings from Groq or OpenAI Whisper).
               </p>
             )}
             {whisperError && (
@@ -2208,7 +2359,7 @@ export function WorkspaceAudioLessonSection() {
                   )}
                   {fullDisplayTranscript ? (
                     <p
-                      className="mt-4 text-xl leading-relaxed text-neutral-900 sm:text-2xl sm:leading-relaxed"
+                      className="mt-4 whitespace-pre-line text-xl leading-relaxed text-neutral-900 sm:text-2xl sm:leading-relaxed"
                       lang="ja"
                       style={{ wordBreak: "break-word" }}
                     >
@@ -2292,7 +2443,10 @@ export function WorkspaceAudioLessonSection() {
                             </span>
                           </p>
                           {displayLine.trim() || phrase ? (
-                            <p className="mt-3 text-lg leading-relaxed text-neutral-900 sm:text-xl" lang="ja">
+                            <p
+                              className="mt-3 whitespace-pre-line text-lg leading-relaxed text-neutral-900 sm:text-xl"
+                              lang="ja"
+                            >
                               {displayLine.trim() || phrase}
                             </p>
                           ) : (

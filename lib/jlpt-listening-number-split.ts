@@ -11,7 +11,11 @@ export type TimedTextSlice = {
 };
 
 function normalizeForCompare(s: string): string {
-  return s.replace(/\s+/gu, "").normalize("NFKC").toLowerCase();
+  return s
+    .replace(/[\u200b-\u200d\ufeff\u00ad]/g, "")
+    .replace(/\s+/gu, "")
+    .normalize("NFKC")
+    .toLowerCase();
 }
 
 function buildCharSpans(words: TranscribedWord[]): { c0: number; c1: number; t0: number; t1: number }[] {
@@ -47,6 +51,34 @@ function timeAtJoinedChar(spans: { c0: number; c1: number; t0: number; t1: numbe
   return spans.at(-1)!.t1;
 }
 
+/** Digit glued to these openings → new listening item (JLPT / Minna style). */
+const JLPT_NUMBERED_ITEM_OPEN =
+  "あの|あそ|どんな|どの|これ|それ|その|今度|今回|来週|昨日|今日|明日|何|誰|どこ|いつ|どう|じゃあ|でも|はい|ええ|うん|すみ|わか|よく|大き|面白|パーティ|いい|もち|では|おは|すみま";
+
+/**
+ * Single-digit listening sub-item (1–9) immediately before Japanese text.
+ * Excludes dates/counters like `1月`, `12`, `が2つ` (digit + つ).
+ */
+const LISTENING_SUBITEM_DIGIT_GLUE =
+  "([1-9１-９\\uFF11-\\uFF19])(?![0-9０-９\\uFF10-\\uFF19番月日時分秒年])(?!つ)(?=[ぁ-んァ-ヺ一-龯])";
+
+/**
+ * True when text begins with `1`…`9` immediately followed by a typical question stem (no space).
+ * Used so sticky “one listening block” logic applies to `1あの…` as well as `1 ミラー…`.
+ */
+export function startsWithGluedNumberedListeningItem(text: string): boolean {
+  const t = text.trimStart();
+  if (
+    new RegExp(`^${LISTENING_SUBITEM_DIGIT_GLUE}`, "u").test(t)
+  ) {
+    return true;
+  }
+  return new RegExp(
+    `^[1-9１-９\\uFF11-\\uFF19](?![番月日時分秒年])(?=(?:${JLPT_NUMBERED_ITEM_OPEN}))`,
+    "u"
+  ).test(t);
+}
+
 /**
  * Character offsets in the joined Whisper `words` string where a new listening “part” should start.
  * JLPT / textbook: `第n課問題m番` + `1…`, glued `…か2ひ…`, `2 …` / `3 …`, party→国会, etc.
@@ -59,13 +91,8 @@ export function jlptListeningCutCharIndices(joined: string): number[] {
     cuts.add(m.index + m[0].length);
   }
 
-  /* Glued item after digit+番: "2番1ミラー…" / "2 番1…" */
-  for (const m of joined.matchAll(/([0-9０-９\uFF10-\uFF19]\s*番)([1-9])(?=[ぁ-んァ-ヺ一-龯])/gu)) {
-    cuts.add(m.index + m[1].length);
-  }
-
   /* Line-leading question numbers: "\n1 ミラー" (space after digit); not "1月" (no space before 月) */
-  for (const m of joined.matchAll(/(^|[\n\r])([ \t\u3000]*)([1-9])\s+(?=[ぁ-んァ-ヺ一-龯])/gu)) {
+  for (const m of joined.matchAll(/(^|[\n\r])([ \t\u3000]*)([1-9１-９\uFF11-\uFF19])\s+(?=[ぁ-んァ-ヺ一-龯])/gu)) {
     cuts.add(m.index + m[1].length + m[2].length);
   }
 
@@ -90,11 +117,21 @@ export function jlptListeningCutCharIndices(joined: string): number[] {
     cuts.add(m.index + m[1].length);
   }
 
-  /* After sentence / line end — not "メキシコ2", not clock/calendar "4時", "3月" */
+  /* After sentence / line end — include 1–9 (not "3月", "4時"); "。1あの" / "。2どんな" / fullwidth digits */
   for (const m of joined.matchAll(
-    /(?<=[。．！？\n\r\u3000])(\s*)([2-9])(?![番月日時分秒年])(?=[一-龯ぁ-んァ-ヺ])/gu,
+    /(?<=[。．！？…\n\r\u3000])(\s*)([1-9１-９\uFF11-\uFF19])(?![番月日時分秒年])(?=[一-龯ぁ-んァ-ヺ])/gu,
   )) {
     cuts.add(m.index + m[1].length);
+  }
+
+  /* Glued item index: "...ません2ミラー" / "番1先生" — any JP stem; not が2つ / 1月 */
+  for (const m of joined.matchAll(
+    new RegExp(`(?<=[ぁ-んァ-ヺ一-龯。．！？…」』\\u3000番])${LISTENING_SUBITEM_DIGIT_GLUE}`, "gu")
+  )) {
+    cuts.add(m.index);
+  }
+  for (const m of joined.matchAll(new RegExp(`^${LISTENING_SUBITEM_DIGIT_GLUE}`, "gu"))) {
+    cuts.add(m.index);
   }
 
   /* Party scene ends → Diet passage (often no spoken “4 ” in the transcript) */
@@ -152,12 +189,26 @@ export function splitLessonSegmentsByJlptWordCuts(options: {
     out.push({ startSec, endSec, text: slice });
   }
 
+  if (out.length >= 2) {
+    const a = out[0]!;
+    const b = out[1]!;
+    const ta = a.text.trim();
+    if (/^[0-9０-９\uFF10-\uFF19]{1,2}\s*番\s*$/u.test(ta) || /^[0-9０-９\uFF10-\uFF19]{1,2}番$/u.test(ta)) {
+      out.splice(0, 2, {
+        startSec: a.startSec,
+        endSec: b.endSec,
+        text: `${ta} ${b.text.trim()}`.trim(),
+      });
+    }
+  }
+
   return out.length > 0 ? out : null;
 }
 
 /** If the next ASR fragment begins a new numbered listening prompt, do not merge into the previous part. */
 export function nextStartsNumberedListeningPrompt(text: string): boolean {
   const n = text.trimStart();
+  if (startsWithGluedNumberedListeningItem(n)) return true;
   if (/^[1１\uFF11](?=\s*[ぁ-んァ-ヺ一-龯])/u.test(n)) return true;
   if (/^[0-9０-９\uFF10-\uFF19]+\s*番/u.test(n)) return true;
   /* Textbook "2 今晩…" / "5 昨日…" — digit + spaces + kana (glued "2今…" covered below) */
@@ -165,7 +216,48 @@ export function nextStartsNumberedListeningPrompt(text: string): boolean {
   /* Next passage when “4 ” was not transcribed */
   if (/^国会議事堂を見学/u.test(n)) return true;
   if (/^[2-9]\s+[a-zA-Z]/u.test(n)) return true;
-  if (/^[2-9](?![番月日時分秒年])(?=[ァ-ヺ一-龯ぁ-んa-zA-Z])/u.test(n)) return true;
+  if (/^[2-9２-９](?![番月日時分秒年])(?=[ァ-ヺ一-龯ぁ-んa-zA-Z])/u.test(n)) return true;
   if (/^[２-９]\s/u.test(n)) return true;
   return false;
+}
+
+/**
+ * Insert newlines before glued listening item numbers (after sentence punctuation) so
+ * "…です。1あの2どんな" displays one item per line in the Parts UI.
+ */
+export function insertLineBreaksForListeningPartDisplay(text: string): string {
+  const t = text.replace(/\r\n/g, "\n").trim();
+  if (!t) return text;
+
+  let s = t;
+
+  /* "2番 1先生…" / "2番1先生…" — header on its own block, then first item */
+  s = s.replace(
+    /([0-9０-９\uFF10-\uFF19]+\s*番)\s*([1-9１-９\uFF11-\uFF19])(?=[ぁ-んァ-ヺ一-龯])/gu,
+    "$1\n\n$2"
+  );
+  s = s.replace(
+    /(問題[0-9０-９\uFF10-\uFF19]+番)\s*([1１\uFF11])(?=[ぁ-んァ-ヺ一-龯])/gu,
+    "$1\n\n$2"
+  );
+
+  /* "…ません2ミラー" / "…ました3ミラー" / "…です4 将来" */
+  s = s.replace(
+    /([。．！？…])(\s*)([1-9１-９\uFF11-\uFF19])(?![0-9０-９\uFF10-\uFF19番月日時分秒年])(?!つ)(?=[ぁ-んァ-ヺ一-龯])/gu,
+    "$1$2\n$3"
+  );
+  s = s.replace(
+    new RegExp(
+      `(?<=[ぁ-んァ-ヺ一-龯。．！？…」』番\\n\\r\\u3000])([1-9１-９\\uFF11-\\uFF19])\\s+(?=[ぁ-んァ-ヺ一-龯])`,
+      "gu"
+    ),
+    "\n$1 "
+  );
+  /* Glued "…ん2ミラー" — lookbehind excludes \\n so we do not stack extra breaks after "。\\n1…" */
+  s = s.replace(
+    new RegExp(`(?<=[ぁ-んァ-ヺ一-龯。．！？…」』番\\u3000])${LISTENING_SUBITEM_DIGIT_GLUE}`, "gu"),
+    "\n$1"
+  );
+
+  return s;
 }

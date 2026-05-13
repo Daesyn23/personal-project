@@ -3,7 +3,7 @@
  * optional same-speaker glue when diarization labels exist.
  */
 
-import { nextStartsNumberedListeningPrompt } from "@/lib/jlpt-listening-number-split";
+import { nextStartsNumberedListeningPrompt, startsWithGluedNumberedListeningItem } from "@/lib/jlpt-listening-number-split";
 import { looksLikeStandaloneBackchannel } from "@/lib/reaction-backchannel";
 
 export type LessonTimedSegment = {
@@ -87,6 +87,7 @@ function accStartsNumberedListeningItemLine(text: string): boolean {
   const t = text.trimStart();
   if (/^[1-9１-９]\s+/u.test(t) || /^[1１\uFF11]\s+/u.test(t)) return true;
   if (/^国会議事堂を見学/u.test(t)) return true;
+  if (startsWithGluedNumberedListeningItem(t)) return true;
   return false;
 }
 

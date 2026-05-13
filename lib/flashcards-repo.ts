@@ -253,6 +253,54 @@ export async function addCardsToSet(setId: string, cards: FlashcardDraft[]): Pro
 }
 
 /** Append cards to an existing set (positions continue after the current max). */
+/** Insert one card at the given position (caller may reorder the whole set afterward). */
+export async function createFlashcard(
+  setId: string,
+  card: Omit<FlashcardDraft, "set_id" | "position">,
+  position: number
+): Promise<string> {
+  const id =
+    card.id && !String(card.id).startsWith("draft:") && String(card.id).trim()
+      ? String(card.id).trim()
+      : crypto.randomUUID();
+
+  const row: FlashcardRow = {
+    id,
+    set_id: setId,
+    phonetic_reading: card.phonetic_reading ?? null,
+    native_script: card.native_script ?? null,
+    kana: card.kana ?? null,
+    kanji: card.kanji ?? null,
+    category_label: card.category_label ?? null,
+    definition: card.definition ?? null,
+    context_note: card.context_note ?? null,
+    example_sentence: card.example_sentence ?? null,
+    example_translation: card.example_translation ?? null,
+    teacher_research: card.teacher_research ?? null,
+    position,
+    created_at: new Date().toISOString(),
+  };
+
+  const supabase = getSupabaseBrowserClient();
+  if (supabase) {
+    const { created_at, ...rest } = row;
+    void created_at;
+    const { error } = await supabase.from("flashcards").insert(rest);
+    if (error) {
+      console.error(error);
+      const store = readLocal();
+      store.cards.push(row);
+      writeLocal(store);
+      throw error;
+    }
+    return id;
+  }
+  const store = readLocal();
+  store.cards.push(row);
+  writeLocal(store);
+  return id;
+}
+
 export async function appendCardsToSet(setId: string, cards: FlashcardDraft[]): Promise<void> {
   if (cards.length === 0) return;
 

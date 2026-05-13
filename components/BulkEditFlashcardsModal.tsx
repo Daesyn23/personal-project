@@ -1,8 +1,50 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { deleteFlashcard, deleteFlashcards, updateFlashcard } from "@/lib/flashcards-repo";
-import type { FlashcardRow } from "@/lib/types";
+import {
+  createFlashcard,
+  deleteFlashcard,
+  deleteFlashcards,
+  listFlashcardsInSet,
+  reorderFlashcardsInSet,
+  updateFlashcard,
+} from "@/lib/flashcards-repo";
+import type { FlashcardDraft, FlashcardRow } from "@/lib/types";
+
+const DRAFT_PREFIX = "draft:";
+
+function isDraftId(id: string): boolean {
+  return id.startsWith(DRAFT_PREFIX);
+}
+
+/** Place the bulk-edited block (in `selectedOrderedIds` order) at the first original slot of any selected card. */
+function mergeSelectedSubsetOrderIntoFullOrder(full: FlashcardRow[], selectedOrderedIds: string[]): string[] {
+  const sel = new Set(selectedOrderedIds);
+  const byId = new Map(full.map((c) => [c.id, c]));
+  const sorted = [...full].sort((a, b) => a.position - b.position);
+  const minIdx = sorted.findIndex((c) => sel.has(c.id));
+  if (minIdx === -1) {
+    return sorted.map((c) => c.id);
+  }
+  const before = sorted.slice(0, minIdx).filter((c) => !sel.has(c.id));
+  const after = sorted.slice(minIdx).filter((c) => !sel.has(c.id));
+  const orderedSel = selectedOrderedIds.map((id) => {
+    const c = byId.get(id);
+    if (!c) throw new Error(`Card ${id} is missing from the set. Close bulk edit and try again.`);
+    return c;
+  });
+  return [...before, ...orderedSel, ...after].map((c) => c.id);
+}
+
+function reorderArray<T>(items: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) {
+    return items;
+  }
+  const next = [...items];
+  const [removed] = next.splice(from, 1);
+  next.splice(to, 0, removed);
+  return next;
+}
 
 type RowDraft = {
   id: string;
@@ -37,6 +79,35 @@ function rowsFromCards(cards: FlashcardRow[]): RowDraft[] {
     example_translation: c.example_translation ?? "",
     teacher_research: c.teacher_research ?? "",
   }));
+}
+
+function newDraftRow(): RowDraft {
+  return {
+    id: `${DRAFT_PREFIX}${crypto.randomUUID()}`,
+    phonetic_reading: "",
+    category_label: "",
+    kana: "",
+    definition: "",
+    context_note: "",
+    example_sentence: "",
+    example_translation: "",
+    teacher_research: "",
+  };
+}
+
+function rowDraftToFlashcardPatch(row: RowDraft): Omit<FlashcardDraft, "set_id" | "position"> {
+  return {
+    phonetic_reading: row.phonetic_reading.trim() || null,
+    category_label: row.category_label.trim() || null,
+    kana: row.kana.trim() || null,
+    kanji: null,
+    native_script: null,
+    definition: row.definition.trim() || null,
+    context_note: row.context_note.trim() || null,
+    example_sentence: row.example_sentence.trim() || null,
+    example_translation: row.example_translation.trim() || null,
+    teacher_research: row.teacher_research.trim() || null,
+  };
 }
 
 /** True when every editable cell is blank (trimmed). */
@@ -107,6 +178,7 @@ function IconTrash() {
 }
 
 type Props = {
+  setId: string;
   cards: FlashcardRow[];
   onClose: () => void;
   onSaved: () => void;
@@ -123,14 +195,19 @@ const iconDelete =
 const btnSecondary =
   "inline-flex min-h-[36px] items-center justify-center rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-800 shadow-sm transition hover:bg-pink-50 disabled:pointer-events-none disabled:opacity-45";
 
+const gripHandle =
+  "flex cursor-grab select-none flex-col items-center justify-center rounded-lg border border-pink-200/80 bg-pink-50/50 px-1.5 py-2 text-pink-400 shadow-sm hover:bg-pink-100/60 active:cursor-grabbing";
+
 /**
  * Spreadsheet-style bulk edit: one row per card, columns match the single-card editor fields.
  */
-export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemoved }: Props) {
+export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCardsRemoved }: Props) {
   const [rows, setRows] = useState<RowDraft[]>(() => rowsFromCards(cards));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [geminiReady, setGeminiReady] = useState<boolean | null>(null);
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,7 +226,7 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
   }, []);
 
   const canAutofill = useMemo(
-    () => rows.some(rowWantsEnrichment) && geminiReady === true,
+    () => rows.some((r) => !isDraftId(r.id) && rowWantsEnrichment(r)) && geminiReady === true,
     [rows, geminiReady]
   );
 
@@ -158,11 +235,17 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
       return "Add GEMINI_API_KEY, GROQ_API_KEY, and/or OPENAI_API_KEY to .env.local to use AI autofill.";
     if (geminiReady === null) return "Checking AI configuration…";
     if (rows.length === 0) return "";
-    if (!rows.some(rowWantsEnrichment)) {
-      return "All target fields are already filled (romaji, group, example, translation, teacher research).";
+    if (!rows.some((r) => !isDraftId(r.id) && rowWantsEnrichment(r))) {
+      return "All target fields are already filled (romaji, group, example, translation, teacher research), or new rows need a saved card id for autofill.";
     }
     return "";
   }, [rows, geminiReady]);
+
+  const hasPendingChanges = useMemo(() => {
+    if (rows.some((r) => !rowIsEmpty(r))) return true;
+    if (rows.some((r) => rowIsEmpty(r) && !isDraftId(r.id))) return true;
+    return false;
+  }, [rows]);
 
   const updateCell = (index: number, field: keyof Omit<RowDraft, "id">, value: string) => {
     setRows((prev) => {
@@ -173,8 +256,20 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
     });
   };
 
+  const addRow = (afterIndex: number | null) => {
+    setRows((prev) => {
+      const row = newDraftRow();
+      if (afterIndex === null || afterIndex >= prev.length) {
+        return [...prev, row];
+      }
+      const next = [...prev];
+      next.splice(afterIndex + 1, 0, row);
+      return next;
+    });
+  };
+
   const runAutofill = useCallback(async () => {
-    const toSend = rows.filter(rowWantsEnrichment);
+    const toSend = rows.filter((r) => !isDraftId(r.id) && rowWantsEnrichment(r));
     if (toSend.length === 0 || geminiReady !== true) return;
 
     setBusy(true);
@@ -217,6 +312,10 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
   const removeRowByIcon = async (index: number) => {
     const id = rows[index]?.id;
     if (!id) return;
+    if (isDraftId(id)) {
+      setRows((prev) => prev.filter((_, i) => i !== index));
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -231,6 +330,11 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
   };
 
   const save = async () => {
+    if (!setId.trim()) {
+      setError("No collection is active.");
+      return;
+    }
+
     const emptyRows = rows.filter(rowIsEmpty);
     const nonempty = rows.filter((r) => !rowIsEmpty(r));
 
@@ -250,30 +354,38 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
     setBusy(true);
     setError(null);
     try {
-      const emptyIds = emptyRows.map((r) => r.id);
-      if (emptyIds.length) {
-        await deleteFlashcards(emptyIds);
-        onCardsRemoved?.(emptyIds);
+      const emptyRealIds = emptyRows.map((r) => r.id).filter((id) => !isDraftId(id));
+      if (emptyRealIds.length) {
+        await deleteFlashcards(emptyRealIds);
+        onCardsRemoved?.(emptyRealIds);
       }
-      if (nonempty.length) {
-        await Promise.all(
-          nonempty.map((row) => {
-            const def = row.definition.trim();
-            const ka = row.kana.trim();
-            return updateFlashcard(row.id, {
-              phonetic_reading: row.phonetic_reading.trim() || null,
-              category_label: row.category_label.trim() || null,
-              definition: def || null,
-              context_note: row.context_note.trim() || null,
-              kana: ka || null,
-              kanji: null,
-              example_sentence: row.example_sentence.trim() || null,
-              example_translation: row.example_translation.trim() || null,
-              teacher_research: row.teacher_research.trim() || null,
-            });
-          })
-        );
+
+      const idMap = new Map<string, string>();
+      for (const row of nonempty) {
+        if (isDraftId(row.id)) {
+          const newId = await createFlashcard(setId, rowDraftToFlashcardPatch(row), 0);
+          idMap.set(row.id, newId);
+        }
       }
+
+      const resolvedIds = nonempty.map((r) => idMap.get(r.id) ?? r.id);
+
+      for (const row of nonempty) {
+        if (isDraftId(row.id)) continue;
+        const id = row.id;
+        const patch = rowDraftToFlashcardPatch(row);
+        await updateFlashcard(id, patch);
+      }
+
+      const full = await listFlashcardsInSet(setId);
+      if (resolvedIds.length > 0) {
+        const mergedIds = mergeSelectedSubsetOrderIntoFullOrder(full, resolvedIds);
+        if (mergedIds.length !== full.length) {
+          throw new Error("Could not save order: deck changed while editing. Close and try again.");
+        }
+        await reorderFlashcardsInSet(setId, mergedIds);
+      }
+
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save");
@@ -283,6 +395,7 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
   };
 
   const n = rows.length;
+  const nonemptyCount = rows.filter((r) => !rowIsEmpty(r)).length;
 
   return (
     <div
@@ -294,16 +407,27 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
       <div className="flex max-h-[92vh] w-full max-w-[min(96rem,calc(100vw-1.5rem))] flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
         <div className="shrink-0 border-b border-pink-100 px-4 py-3 sm:px-5 sm:py-4">
           <h2 id="bulk-edit-title" className="text-lg font-semibold text-neutral-900">
-            Bulk edit ({n} card{n === 1 ? "" : "s"})
+            Bulk edit ({n} row{n === 1 ? "" : "s"}, {nonemptyCount} with content)
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
-            Each row is one card. English gloss and/or kana is required unless you clear the whole row (save will delete
-            it) or use the trash icon to remove a card immediately.{" "}
+            Each row is one card. Use <strong className="font-semibold text-neutral-700">Add row</strong> for new cards
+            and <strong className="font-semibold text-neutral-700">drag the handle</strong> in the first column to change
+            order (saved with the deck). English gloss and/or kana is required unless you clear the whole row (save will
+            delete it) or use the trash icon.{" "}
             <strong className="font-semibold text-neutral-700">Teacher research</strong> is prep only and never appears
             on presentation slides. AI fills it in <strong className="font-semibold text-neutral-700">Taglish</strong>{" "}
             (Tagalog–English mix); clear the cell and run autofill again to regenerate.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className={btnSecondary}
+              disabled={busy}
+              onClick={() => addRow(null)}
+              title="Append a new blank row at the end"
+            >
+              Add row
+            </button>
             <button
               type="button"
               className={btnSecondary}
@@ -334,12 +458,21 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[76rem] border-collapse text-left text-xs">
+          <table className="w-full min-w-[78rem] border-collapse text-left text-xs">
             <thead className="sticky top-0 z-20 border-b border-pink-100 bg-gradient-to-b from-white to-pink-50/80 shadow-sm">
               <tr>
                 <th
                   scope="col"
-                  className="sticky left-0 z-30 whitespace-nowrap border-r border-pink-100 bg-gradient-to-b from-white to-pink-50/80 px-2 py-2 pl-3 font-semibold text-neutral-600"
+                  className="sticky left-0 z-30 w-[4.5rem] whitespace-nowrap border-r border-pink-100 bg-gradient-to-b from-white to-pink-50/80 px-1 py-2 pl-2 font-semibold text-neutral-600"
+                >
+                  <span className="sr-only">Drag to reorder</span>
+                  <span aria-hidden className="text-[0.65rem] font-normal text-neutral-400">
+                    drag
+                  </span>
+                </th>
+                <th
+                  scope="col"
+                  className="sticky left-[4.5rem] z-30 w-8 whitespace-nowrap border-r border-pink-100 bg-gradient-to-b from-white to-pink-50/80 px-1 py-2 font-semibold text-neutral-600"
                 >
                   #
                 </th>
@@ -377,8 +510,67 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
             </thead>
             <tbody>
               {rows.map((row, i) => (
-                <tr key={row.id} className="border-b border-pink-50/90 even:bg-pink-50/20">
-                  <td className="sticky left-0 z-10 whitespace-nowrap border-r border-pink-100/80 bg-white px-2 py-1.5 pl-3 text-neutral-500 tabular-nums even:bg-[#fffafc]">
+                <tr
+                  key={row.id}
+                  onDragOver={(e) => {
+                    if (busy) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setDragOverIndex(i);
+                  }}
+                  onDrop={(e) => {
+                    if (busy) return;
+                    e.preventDefault();
+                    const raw = e.dataTransfer.getData("text/plain");
+                    const from = parseInt(raw, 10);
+                    if (Number.isNaN(from) || from === i) {
+                      setDragOverIndex(null);
+                      return;
+                    }
+                    setRows((prev) => reorderArray(prev, from, i));
+                    setDragOverIndex(null);
+                    setDraggingIndex(null);
+                  }}
+                  className={`border-b border-pink-50/90 even:bg-pink-50/20 transition ${
+                    dragOverIndex === i && draggingIndex !== null && draggingIndex !== i
+                      ? "bg-pink-100/50 ring-2 ring-inset ring-pink-300"
+                      : ""
+                  } ${draggingIndex === i ? "opacity-55" : ""}`}
+                >
+                  <td className="sticky left-0 z-10 border-r border-pink-100/80 bg-white px-1 py-1 align-middle even:bg-[#fffafc]">
+                    <div className="flex flex-col items-center gap-1">
+                      <div
+                        className={`${gripHandle} ${busy ? "pointer-events-none opacity-40" : ""}`}
+                        draggable={!busy}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/plain", String(i));
+                          e.dataTransfer.effectAllowed = "move";
+                          setDraggingIndex(i);
+                        }}
+                        onDragEnd={() => {
+                          setDraggingIndex(null);
+                          setDragOverIndex(null);
+                        }}
+                        aria-label={`Drag to reorder row ${i + 1}`}
+                        title="Drag to reorder"
+                      >
+                        <span className="flex flex-col gap-0.5 leading-none" aria-hidden>
+                          <span>⋮</span>
+                          <span>⋮</span>
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="text-[0.65rem] font-medium text-pink-700 underline decoration-pink-300 underline-offset-2 hover:text-pink-900 disabled:opacity-40"
+                        disabled={busy}
+                        title="Insert a blank row below this one"
+                        onClick={() => addRow(i)}
+                      >
+                        + row
+                      </button>
+                    </div>
+                  </td>
+                  <td className="sticky left-[4.5rem] z-10 w-8 whitespace-nowrap border-r border-pink-100/80 bg-white px-1 py-1.5 text-center text-neutral-500 tabular-nums even:bg-[#fffafc]">
                     {i + 1}
                   </td>
                   <td className="px-1 py-1 align-top">
@@ -488,11 +680,11 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
           </button>
           <button
             type="button"
-            disabled={busy || n === 0}
+            disabled={busy || !hasPendingChanges}
             onClick={() => void save()}
             className="rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50"
           >
-            {busy ? "Saving…" : `Save ${n} card${n === 1 ? "" : "s"}`}
+            {busy ? "Saving…" : `Save (${nonemptyCount} card${nonemptyCount === 1 ? "" : "s"})`}
           </button>
         </div>
       </div>
