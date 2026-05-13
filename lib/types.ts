@@ -49,11 +49,13 @@ export type WorkspaceFileRow = {
   created_at?: string;
 };
 
-/** Whisper phrase segment (Groq) persisted with audio lessons */
+/** Whisper / diarized phrase segment persisted with audio lessons */
 export type AudioLessonSegment = {
   startSec: number;
   endSec: number;
   text?: string;
+  /** Present when transcribed with speaker-aware segmentation (e.g. OpenAI diarization). */
+  speaker?: string;
 };
 
 export type AudioLessonRow = {
@@ -67,6 +69,8 @@ export type AudioLessonRow = {
   sample_rate: number;
   number_of_channels: number;
   segments: AudioLessonSegment[];
+  /** How phrases were produced: lesson pipeline vs raw Whisper segments. */
+  phrase_division?: "lesson" | "raw";
   created_at: string;
   updated_at: string;
 };

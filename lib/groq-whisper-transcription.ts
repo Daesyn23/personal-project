@@ -3,6 +3,7 @@
  * https://console.groq.com/docs/speech-to-text
  */
 
+import type { TranscribedWord } from "@/lib/jlpt-listening-number-split";
 import { isGroqConfigured } from "@/lib/groq-openai";
 
 const GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
@@ -16,6 +17,12 @@ export type GroqWhisperPhraseSegment = {
   text: string;
 };
 
+export type GroqWhisperVerboseBundle = {
+  fullText: string;
+  segments: GroqWhisperPhraseSegment[];
+  words: TranscribedWord[];
+};
+
 export function isGroqWhisperConfigured(): boolean {
   return isGroqConfigured();
 }
@@ -26,15 +33,13 @@ export function resolveGroqWhisperModelId(): string {
 }
 
 /**
- * Transcribe audio and return timed segments (good phrase boundaries for dialogue).
- * Does not perform speaker diarization — splits follow Whisper’s segmenter.
+ * Transcribe with segment + word timestamps (for JLPT-style re-sectioning).
  */
-export async function groqTranscriptionPhraseSegments(options: {
+export async function groqTranscriptionVerboseBundle(options: {
   file: Blob;
   filename: string;
-  /** ISO-639-1 e.g. ja — improves Japanese accuracy */
   language?: string;
-}): Promise<GroqWhisperPhraseSegment[]> {
+}): Promise<GroqWhisperVerboseBundle> {
   const apiKey = process.env.GROQ_API_KEY?.trim();
   if (!apiKey) {
     throw new Error("GROQ_API_KEY is not set.");
@@ -47,6 +52,7 @@ export async function groqTranscriptionPhraseSegments(options: {
   form.append("model", model);
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "segment");
+  form.append("timestamp_granularities[]", "word");
   if (options.language) {
     form.append("language", options.language);
   }
@@ -80,9 +86,38 @@ export async function groqTranscriptionPhraseSegments(options: {
     throw new Error("Groq response missing segments array.");
   }
 
-  return segments.map((s) => ({
-    startSec: Math.max(0, s.start),
-    endSec: Math.max(s.start, s.end),
-    text: typeof s.text === "string" ? s.text.trim() : "",
-  }));
+  const wordsRaw = (data as { words?: { start: number; end: number; word?: string; text?: string }[] }).words;
+  const words: TranscribedWord[] = Array.isArray(wordsRaw)
+    ? wordsRaw.map((w) => ({
+        word: typeof w.word === "string" ? w.word : typeof w.text === "string" ? w.text : "",
+        startSec: Math.max(0, w.start),
+        endSec: Math.max(w.start, w.end),
+      }))
+    : [];
+
+  const fullText = typeof (data as { text?: string }).text === "string" ? (data as { text: string }).text : "";
+
+  return {
+    fullText,
+    segments: segments.map((s) => ({
+      startSec: Math.max(0, s.start),
+      endSec: Math.max(s.start, s.end),
+      text: typeof s.text === "string" ? s.text.trim() : "",
+    })),
+    words,
+  };
+}
+
+/**
+ * Transcribe audio and return timed segments (good phrase boundaries for dialogue).
+ * Does not perform speaker diarization — splits follow Whisper’s segmenter.
+ */
+export async function groqTranscriptionPhraseSegments(options: {
+  file: Blob;
+  filename: string;
+  /** ISO-639-1 e.g. ja — improves Japanese accuracy */
+  language?: string;
+}): Promise<GroqWhisperPhraseSegment[]> {
+  const b = await groqTranscriptionVerboseBundle(options);
+  return b.segments;
 }

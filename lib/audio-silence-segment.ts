@@ -5,6 +5,70 @@
 
 export type AudioSegmentRange = { startSec: number; endSec: number };
 
+/**
+ * Removes sample-level overlap between adjacent phrase segments (common with Whisper timestamps).
+ * Produces boundaries so `floor(start*sr)` / `ceil(end*sr)` in {@link sliceAudioBuffer} never assign
+ * the same sample to two clips. Times are encoded so existing floor/ceil slicing round-trips:
+ * start uses (sample + 0.5)/sr, end uses (exclusiveEndSample - 0.5)/sr.
+ *
+ * @param maxSampleExclusive — total PCM frames in the buffer (e.g. `audioBuffer.length`).
+ */
+export function snapSegmentsToNonOverlappingSlices(
+  segments: AudioSegmentRange[],
+  sampleRate: number,
+  maxSampleExclusive: number
+): AudioSegmentRange[] {
+  if (segments.length === 0 || !Number.isFinite(sampleRate) || sampleRate <= 0) return segments;
+  const maxEx = Math.max(0, Math.floor(maxSampleExclusive));
+  if (maxEx === 0) return segments;
+
+  const minSamples = Math.max(1, Math.floor(sampleRate * 0.02));
+  let prevEndExclusive = 0;
+  const out: AudioSegmentRange[] = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]!;
+    const rawStart = Math.max(0, Math.min(maxEx, Math.floor(seg.startSec * sampleRate)));
+    const rawEndExclusive = Math.max(0, Math.min(maxEx, Math.ceil(seg.endSec * sampleRate)));
+
+    const startSample = Math.max(rawStart, prevEndExclusive);
+
+    let endExclusive: number;
+    if (i + 1 < segments.length) {
+      const nextStartFloor = Math.max(
+        0,
+        Math.min(maxEx, Math.floor(segments[i + 1]!.startSec * sampleRate))
+      );
+      endExclusive = Math.min(rawEndExclusive, Math.max(startSample + 1, nextStartFloor));
+    } else {
+      endExclusive = Math.min(maxEx, Math.max(startSample + 1, rawEndExclusive));
+    }
+
+    if (endExclusive <= startSample) {
+      endExclusive = Math.min(maxEx, startSample + minSamples);
+      if (i + 1 < segments.length) {
+        const nextStartFloor = Math.max(
+          0,
+          Math.min(maxEx, Math.floor(segments[i + 1]!.startSec * sampleRate))
+        );
+        endExclusive = Math.min(endExclusive, Math.max(startSample + 1, nextStartFloor));
+      }
+    }
+
+    if (endExclusive <= startSample) {
+      endExclusive = Math.min(maxEx, startSample + 1);
+    }
+
+    out.push({
+      startSec: (startSample + 0.5) / sampleRate,
+      endSec: (endExclusive - 0.5) / sampleRate,
+    });
+    prevEndExclusive = endExclusive;
+  }
+
+  return out;
+}
+
 export type SilenceSegmentOptions = {
   /** Minimum gap between utterances (ms). Silence shorter than this is ignored. */
   minSilenceMs: number;

@@ -50,7 +50,10 @@ export async function createLocalAudioLesson(
 export async function updateLocalAudioLesson(
   id: string,
   patch: Partial<
-    Pick<AudioLessonRow, "title" | "filename" | "segments" | "duration_sec" | "sample_rate" | "number_of_channels">
+    Pick<
+      AudioLessonRow,
+      "title" | "filename" | "segments" | "duration_sec" | "sample_rate" | "number_of_channels" | "phrase_division"
+    >
   >
 ): Promise<void> {
   const list = readRows();
