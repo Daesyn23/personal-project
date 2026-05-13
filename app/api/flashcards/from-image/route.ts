@@ -36,15 +36,25 @@ Schema:
   ]
 }
 
-Rules:
-- "definition" = English meaning / gloss when visible; otherwise null.
-- "kana" = hiragana or katakana as printed (readings); if only romaji is visible, put it in "phonetic_reading" and leave "kana" null unless you can infer kana with high confidence.
-- "kanji" = kanji headword if shown separately; otherwise null.
+Printed vs handwritten (critical):
+- Only trust **typeset / printed** text from the publisher. Ignore **pencil or pen handwriting**: romaji scribbled above kanji, marginal study notes, underlines, circles, arrows, and any Latin letters that look handwritten or sit on top of printed lines.
+- For typical 3-column layouts (kana column | kanji column | English column): take **kana from the kana column** and **English from the English column**. Do not merge handwritten romaji from the middle column into "kana" or "phonetic_reading".
+- If printed kanji in the middle column is partly covered by handwriting, set "kanji" to null unless the printed kanji is still clearly readable. Never invent kanji from handwriting.
+
+Field rules:
+- "definition" = the **printed English** gloss in the vocabulary table (right column when present). Include parenthetical English that is clearly part of the printed gloss. Omit handwritten English.
+- "kana" = the **printed** hiragana/katakana entry (left column when present), including printed in-line markers such as verb group "I" / "II" / "III", printed bracket Japanese like [パンが～], and printed な in [な] for adjectives—keep those on the kana side so the front of the card matches the book. If the page has no separate kana column but the headword is clearly printed in kana/kanji mix, put hiragana/katakana portions here.
+- "kanji" = **printed** kanji headword when it appears as its own column or clearly separate from kana; otherwise null.
+- "phonetic_reading" = latin romaji **only** when the list itself is printed in romaji or there is **no** printed kana and romaji is clearly **typeset**. For textbook photos with printed kana, leave "phonetic_reading" null even if students wrote romaji by hand.
+- "native_script" = null unless there is a clear extra printed line worth preserving; do not stuff ignored handwriting here.
 - Preserve lesson order top-to-bottom, left-to-right as in the image.
-- Skip headers, page numbers, and decorative text — vocabulary rows only.
-- "verification_note": 2–4 short sentences for the teacher: how confident you are, anything blurry or ambiguous, and what they should double-check before saving. Be honest if a row was guessed.
+- Skip headers ("Lesson …", "I. Vocabulary"), page numbers, and decorative text — vocabulary rows only.
+- "verification_note": 2–4 short sentences for the teacher: confidence, blur/ambiguity, mention if handwriting was ignored, and what to double-check. Be honest if a row was guessed.
 - If no vocabulary is found, return "cards": [] and explain in "verification_note".
 - At most ${MAX_CARDS} cards; if more, take the first contiguous vocabulary block and say so in "verification_note".`;
+
+const USER_TASK_VISION =
+  "Extract vocabulary rows into the JSON schema. Prefer printed kana (left column) + printed English (right column) on textbook pages; ignore handwritten romaji and notes.";
 
 function optString(v: unknown): string | null {
   if (typeof v !== "string") return null;
@@ -124,8 +134,7 @@ async function extractJsonWithGeminiVision(
   const genAI = new GoogleGenerativeAI(geminiKey);
   const attempts = geminiModelAttemptOrder(resolveGeminiModelId(process.env.GEMINI_MODEL));
   let lastErr: unknown;
-  const userTask =
-    "Extract vocabulary / flashcard rows from this image into the JSON schema described in the system instructions.";
+  const userTask = USER_TASK_VISION;
   for (const modelName of attempts) {
     try {
       const model = genAI.getGenerativeModel({
@@ -175,7 +184,7 @@ async function extractJsonWithOpenAiVision(
           content: [
             {
               type: "text",
-              text: "Extract vocabulary / flashcard rows from this image into the JSON schema.",
+              text: USER_TASK_VISION,
             },
             {
               type: "image_url",
