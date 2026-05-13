@@ -1,7 +1,13 @@
 import { shouldAttemptNextGeminiModel } from "@/lib/gemini-model";
 import { groqChatCompletionText, isGroqConfigured, type GroqChatMessage } from "@/lib/groq-openai";
+import { isOpenAiChatConfigured, openaiChatCompletionText, type OpenAiChatMessage } from "@/lib/openai-chat";
 
-export type LlmTextResult = { text: string; provider: "gemini" | "groq"; model: string };
+export type LlmTextResult = { text: string; provider: "gemini" | "groq" | "openai"; model: string };
+
+/** True when at least one text LLM provider is available (Gemini key and/or Groq and/or OpenAI). */
+export function isAnyTextLlmConfigured(geminiApiKey: string | undefined): boolean {
+  return Boolean(geminiApiKey?.trim()) || isGroqConfigured() || isOpenAiChatConfigured();
+}
 
 /** Do not call Groq if Gemini failed for an invalid Google API key (misconfiguration). */
 export function shouldUseGroqAfterGeminiFailure(error: unknown): boolean {
@@ -10,9 +16,13 @@ export function shouldUseGroqAfterGeminiFailure(error: unknown): boolean {
   return true;
 }
 
+function toOpenAiMessages(messages: GroqChatMessage[]): OpenAiChatMessage[] {
+  return messages.map((m) => ({ role: m.role, content: m.content }));
+}
+
 /**
- * Runs Gemini across `modelAttempts`, then a single Groq chat completion with the same semantics
- * (system + user messages / JSON mode) when Groq is configured and Gemini did not return text.
+ * Runs Gemini across `modelAttempts`, then Groq chat completion, then OpenAI Chat Completions,
+ * using the same message list (system + user + assistant) and JSON mode when requested.
  */
 export async function generateTextGeminiThenGroq(options: {
   logLabel: string;
@@ -44,22 +54,42 @@ export async function generateTextGeminiThenGroq(options: {
     }
   }
 
-  if (!isGroqConfigured()) {
-    if (lastErr instanceof Error) throw lastErr;
-    if (lastErr) throw new Error(String(lastErr));
-    throw new Error("No LLM configured: set GEMINI_API_KEY and/or GROQ_API_KEY in .env.local.");
+  const canTryGroq =
+    isGroqConfigured() && (lastErr === undefined || shouldUseGroqAfterGeminiFailure(lastErr));
+
+  if (canTryGroq) {
+    try {
+      console.warn(`[${logLabel}] Using Groq fallback`, lastErr ?? "(Gemini not configured)");
+      const { text, model } = await groqChatCompletionText({
+        messages: groq.messages,
+        jsonMode: groq.jsonMode,
+        temperature: groq.temperature,
+      });
+      return { text: text.trim(), provider: "groq", model };
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[${logLabel}] Groq failed:`, e);
+    }
   }
 
-  if (lastErr !== undefined && !shouldUseGroqAfterGeminiFailure(lastErr)) {
-    if (lastErr instanceof Error) throw lastErr;
-    throw new Error(String(lastErr));
+  if (isOpenAiChatConfigured()) {
+    try {
+      console.warn(`[${logLabel}] Using OpenAI fallback`, lastErr ?? "(prior providers unavailable)");
+      const { text, model } = await openaiChatCompletionText({
+        messages: toOpenAiMessages(groq.messages),
+        jsonMode: groq.jsonMode,
+        temperature: groq.temperature,
+      });
+      return { text: text.trim(), provider: "openai", model };
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[${logLabel}] OpenAI failed:`, e);
+    }
   }
 
-  console.warn(`[${logLabel}] Using Groq fallback`, lastErr ?? "(Gemini not configured)");
-  const { text, model } = await groqChatCompletionText({
-    messages: groq.messages,
-    jsonMode: groq.jsonMode,
-    temperature: groq.temperature,
-  });
-  return { text: text.trim(), provider: "groq", model };
+  if (lastErr instanceof Error) throw lastErr;
+  if (lastErr) throw new Error(String(lastErr));
+  throw new Error(
+    "No LLM configured: set GEMINI_API_KEY, GROQ_API_KEY, and/or OPENAI_API_KEY in .env.local."
+  );
 }

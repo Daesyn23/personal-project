@@ -25,21 +25,26 @@ function nameFromFilename(filename: string): string {
   return filename.replace(/\.[^.]+$/u, "").replace(/[_-]+/g, " ").trim() || "New set";
 }
 
-/** Row has no slide-1 content — skip instead of creating an empty card. */
+/** Row has no usable headword content — skip instead of creating an empty card. */
 function rowHasEnglishOrKana(r: FlashcardDraft): boolean {
   const def = (r.definition ?? "").trim();
   const ka = (r.kana ?? "").trim();
-  return def.length > 0 || ka.length > 0;
+  const kj = (r.kanji ?? "").trim();
+  const rom = (r.phonetic_reading ?? "").trim();
+  return def.length > 0 || ka.length > 0 || kj.length > 0 || rom.length > 0;
 }
 
 export function ImportFlashcards({ onImported }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [setName, setSetName] = useState("");
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [lessonPaste, setLessonPaste] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [imageAnalyzing, setImageAnalyzing] = useState(false);
+  const [verificationNote, setVerificationNote] = useState<string | null>(null);
 
   const closeModal = () => {
     setModalOpen(false);
@@ -47,6 +52,8 @@ export function ImportFlashcards({ onImported }: Props) {
     setLessonPaste("");
     setSetName("");
     setError(null);
+    setVerificationNote(null);
+    setImageAnalyzing(false);
   };
 
   const applyLessonPasteText = (raw: string) => {
@@ -140,6 +147,79 @@ export function ImportFlashcards({ onImported }: Props) {
     }
   };
 
+  const onPickImageForVision = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const appendToExisting = rows.length > 0;
+    setError(null);
+    if (!appendToExisting) {
+      setVerificationNote(null);
+    }
+    setImageAnalyzing(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch("/api/flashcards/from-image", {
+        method: "POST",
+        body: formData,
+      });
+      const data = (await res.json().catch(() => null)) as {
+        error?: string;
+        cards?: FlashcardDraft[];
+        set_name_guess?: string | null;
+        verification_note?: string;
+      } | null;
+      if (!res.ok) {
+        throw new Error(data?.error ?? `Image import failed (${res.status})`);
+      }
+      const cards = data?.cards ?? [];
+      if (cards.length === 0) {
+        if (appendToExisting) {
+          setVerificationNote((prev) => {
+            const msg =
+              data?.verification_note ??
+              "No vocabulary rows were detected in this image. Existing rows were left unchanged.";
+            return prev?.trim() ? `${prev.trim()}\n\n— Additional image:\n${msg}` : msg;
+          });
+        } else {
+          setRows([]);
+          setVerificationNote(
+            data?.verification_note ??
+              "No vocabulary rows were detected. Try a clearer photo or use file / paste import."
+          );
+        }
+        return;
+      }
+      const newRows = cards.map((d) => ({
+        ...d,
+        _key: makeKey(),
+      }));
+      if (appendToExisting) {
+        setRows((prev) => [...prev, ...newRows]);
+      } else {
+        setRows(newRows);
+      }
+      if (!setName.trim() && typeof data?.set_name_guess === "string" && data.set_name_guess.trim()) {
+        setSetName(data.set_name_guess.trim());
+      }
+      const incomingNote =
+        data?.verification_note ??
+        "Review the table below before saving — the model can misread small type or unusual layouts.";
+      if (appendToExisting) {
+        setVerificationNote((prev) =>
+          prev?.trim() ? `${prev.trim()}\n\n— Additional image:\n${incomingNote}` : incomingNote
+        );
+      } else {
+        setVerificationNote(incomingNote);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Image analysis failed");
+    } finally {
+      setImageAnalyzing(false);
+    }
+  };
+
   const updateRow = (key: string, field: keyof FlashcardDraft, value: string) => {
     setRows((prev) =>
       prev.map((r) =>
@@ -164,7 +244,9 @@ export function ImportFlashcards({ onImported }: Props) {
       return { ...rest, position: i };
     });
     if (payload.length === 0) {
-      setError("Every row is blank in English and kana. Add text in at least one row, or remove empty rows.");
+      setError(
+        "Every row is blank (English, kana, kanji, or romaji). Add text in at least one row, or remove empty rows."
+      );
       return;
     }
     setBusy(true);
@@ -213,9 +295,11 @@ export function ImportFlashcards({ onImported }: Props) {
                 Import a set
               </h2>
               <p className="mt-1 text-sm text-neutral-500">
-                Name your set, then <strong>paste numbered lesson lines</strong> (English + reading + kanji) or choose a
-                file. Pasted lines fill English and Kana; the <strong>kanji column is skipped</strong>. PDF import fills
-                English and Kana when the layout matches a table.
+                Name your set, then <strong>paste numbered lesson lines</strong> (English + reading + kanji), choose a
+                file, or <strong>import from a photo</strong> (OpenAI reads the image; another photo appends rows below).
+                Pasted
+                lines fill English and Kana; the <strong>kanji column is skipped</strong>. PDF import fills English and
+                Kana when the layout matches a table.
               </p>
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
                 <label className="sr-only" htmlFor="set-name">
@@ -236,6 +320,13 @@ export function ImportFlashcards({ onImported }: Props) {
                   className="hidden"
                   onChange={onPickFile}
                 />
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
+                  className="hidden"
+                  onChange={onPickImageForVision}
+                />
                 <button
                   type="button"
                   onClick={() => inputRef.current?.click()}
@@ -243,7 +334,26 @@ export function ImportFlashcards({ onImported }: Props) {
                 >
                   Choose file
                 </button>
+                <button
+                  type="button"
+                  disabled={imageAnalyzing}
+                  onClick={() => imageInputRef.current?.click()}
+                  className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-900 hover:bg-violet-100 disabled:opacity-50"
+                  title="Image import: tries Gemini when GEMINI_API_KEY is set, then OpenAI vision (OPENAI_API_KEY). New photos append rows; review before saving."
+                >
+                  {imageAnalyzing ? "Analyzing image…" : "Import from image (AI)"}
+                </button>
               </div>
+
+              {verificationNote && (
+                <div
+                  className="mt-4 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950"
+                  role="status"
+                >
+                  <p className="font-semibold text-amber-900">Double-check before saving</p>
+                  <p className="mt-1 whitespace-pre-wrap text-amber-950/95">{verificationNote}</p>
+                </div>
+              )}
 
               <div className="mt-4 rounded-xl border border-pink-100 bg-[#fffafc] p-3">
                 <label htmlFor="lesson-paste" className="text-xs font-medium text-neutral-600">
@@ -342,7 +452,7 @@ export function ImportFlashcards({ onImported }: Props) {
               </table>
               {rows.length === 0 && (
                 <p className="py-8 text-center text-neutral-500">
-                  Paste numbered lines above, or choose a CSV, JSON, or PDF file.
+                  Paste numbered lines above, choose a CSV / JSON / PDF file, or use Import from image (AI).
                 </p>
               )}
             </div>
@@ -363,7 +473,7 @@ export function ImportFlashcards({ onImported }: Props) {
               </button>
               <button
                 type="button"
-                disabled={busy || rows.length === 0 || !setName.trim()}
+                disabled={busy || imageAnalyzing || rows.length === 0 || !setName.trim()}
                 onClick={save}
                 className="rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50"
               >

@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 import { isGroqConfigured } from "@/lib/groq-openai";
+import { isOpenAiChatConfigured } from "@/lib/openai-chat";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
   const hasGroq = isGroqConfigured();
-  const configured = hasGemini || hasGroq;
+  const hasOpenAi = isOpenAiChatConfigured();
+  const configured = hasGemini || hasGroq || hasOpenAi;
   return NextResponse.json({
     configured,
     /** Whether GEMINI_API_KEY is set (name must match exactly). */
     hasGemini,
     /** Whether GROQ_API_KEY is set (name must match exactly). */
     hasGroq,
+    /** Whether OPENAI_API_KEY is set (Chat + Whisper + image import). */
+    hasOpenAi,
   });
 }

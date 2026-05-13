@@ -2080,8 +2080,9 @@ export function WorkspaceAudioLessonSection() {
                               .join(" ")}
                           </p>
                           <p className="mt-4 rounded-lg border border-amber-100 bg-amber-50/80 px-3 py-2 text-xs leading-snug text-amber-950">
-                            No word-level timestamps in this response. Use a backend that returns timed words (e.g.
-                            OpenAI) for follow-along highlighting, then tap <span className="font-semibold">Transcribe again</span>.
+                            No word-level timestamps in this response. Use a backend that returns timed words (Groq
+                            Whisper or OpenAI Whisper) for follow-along highlighting, then tap{" "}
+                            <span className="font-semibold">Transcribe again</span>.
                           </p>
                         </>
                       ) : whisperLoading ? (

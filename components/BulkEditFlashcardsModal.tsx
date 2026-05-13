@@ -155,7 +155,7 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
 
   const autofillDisabledReason = useMemo(() => {
     if (geminiReady === false)
-      return "Add GEMINI_API_KEY and/or GROQ_API_KEY to .env.local to use AI autofill.";
+      return "Add GEMINI_API_KEY, GROQ_API_KEY, and/or OPENAI_API_KEY to .env.local to use AI autofill.";
     if (geminiReady === null) return "Checking AI configuration…";
     if (rows.length === 0) return "";
     if (!rows.some(rowWantsEnrichment)) {
@@ -315,8 +315,9 @@ export function BulkEditFlashcardsModal({ cards, onClose, onSaved, onCardsRemove
             </button>
             {geminiReady === false && (
               <span className="text-xs text-amber-800">
-                Add <code className="rounded bg-amber-100 px-1">GEMINI_API_KEY</code> or{" "}
-                <code className="rounded bg-amber-100 px-1">GROQ_API_KEY</code> to{" "}
+                Add <code className="rounded bg-amber-100 px-1">GEMINI_API_KEY</code>,{" "}
+                <code className="rounded bg-amber-100 px-1">GROQ_API_KEY</code>, or{" "}
+                <code className="rounded bg-amber-100 px-1">OPENAI_API_KEY</code> to{" "}
                 <code className="rounded bg-amber-100 px-1">.env.local</code> for AI.
               </span>
             )}

@@ -6,8 +6,7 @@ import {
   resolveGeminiModelId,
   withGemini429QuotaRetry,
 } from "@/lib/gemini-model";
-import { generateTextGeminiThenGroq } from "@/lib/gemini-with-groq-fallback";
-import { isGroqConfigured } from "@/lib/groq-openai";
+import { generateTextGeminiThenGroq, isAnyTextLlmConfigured } from "@/lib/gemini-with-groq-fallback";
 
 export const runtime = "nodejs";
 /** Allows one RetryInfo backoff on 429; needs a host with a long enough route timeout (e.g. local dev). */
@@ -269,11 +268,11 @@ function extractResultsArray(parsed: unknown): unknown[] | null {
 
 export async function POST(req: Request) {
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!geminiKey && !isGroqConfigured()) {
+  if (!isAnyTextLlmConfigured(geminiKey)) {
     return NextResponse.json(
       {
         error:
-          "Add GEMINI_API_KEY and/or GROQ_API_KEY to .env.local (same as chat/translate) and restart the dev server.",
+          "Add GEMINI_API_KEY, GROQ_API_KEY, and/or OPENAI_API_KEY to .env.local (same as chat/translate) and restart the dev server.",
       },
       { status: 503 }
     );

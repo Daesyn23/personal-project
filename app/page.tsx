@@ -451,7 +451,7 @@ export default function HomePage() {
             <div className="rounded-2xl border border-dashed border-pink-200/80 bg-white/90 px-6 py-14 text-center shadow-inner shadow-pink-100/30">
               <p className="text-neutral-600">
                 No collections yet. Use <strong className="text-neutral-800">New collection</strong> for an empty set, or{" "}
-                <strong className="text-neutral-800">Import to a set</strong> for CSV, JSON, or PDF.
+                <strong className="text-neutral-800">Import to a set</strong> for CSV, JSON, PDF, or a vocabulary photo (OpenAI).
               </p>
             </div>
           ) : (

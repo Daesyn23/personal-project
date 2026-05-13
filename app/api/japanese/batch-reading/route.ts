@@ -1,8 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
-import { generateTextGeminiThenGroq } from "@/lib/gemini-with-groq-fallback";
+import { generateTextGeminiThenGroq, isAnyTextLlmConfigured } from "@/lib/gemini-with-groq-fallback";
 import { geminiModelAttemptOrder, resolveGeminiModelId } from "@/lib/gemini-model";
-import { isGroqConfigured } from "@/lib/groq-openai";
 
 export const runtime = "nodejs";
 
@@ -33,11 +32,11 @@ function stripJsonFence(raw: string): string {
 
 export async function POST(req: Request) {
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!geminiKey && !isGroqConfigured()) {
+  if (!isAnyTextLlmConfigured(geminiKey)) {
     return NextResponse.json(
       {
         error:
-          "Hiragana readings need GEMINI_API_KEY and/or GROQ_API_KEY in .env.local (same as Translate / Grammar).",
+          "Hiragana readings need GEMINI_API_KEY, GROQ_API_KEY, and/or OPENAI_API_KEY in .env.local (same as Translate / Grammar).",
       },
       { status: 503 }
     );

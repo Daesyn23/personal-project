@@ -545,8 +545,9 @@ export function WorkspaceTranslationSection() {
           </div>
           {geminiReady === false && (
             <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50/95 px-4 py-3 text-sm text-amber-950">
-              Add <code className="rounded bg-amber-100 px-1">GEMINI_API_KEY</code> or{" "}
-              <code className="rounded bg-amber-100 px-1">GROQ_API_KEY</code> to{" "}
+              Add <code className="rounded bg-amber-100 px-1">GEMINI_API_KEY</code>,{" "}
+              <code className="rounded bg-amber-100 px-1">GROQ_API_KEY</code>, or{" "}
+              <code className="rounded bg-amber-100 px-1">OPENAI_API_KEY</code> to{" "}
               <code className="rounded bg-amber-100 px-1">.env.local</code>, restart <code className="rounded bg-amber-100 px-1">npm run dev</code>, then refresh this page.
             </p>
           )}

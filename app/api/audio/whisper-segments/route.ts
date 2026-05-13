@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { postProcessLessonTimedSegments, type LessonTimedSegment } from "@/lib/dialogue-segment-merge";
 import { refineBackchannelBoundsWithWords } from "@/lib/reaction-backchannel";
-import { groqTranscriptionVerboseBundle } from "@/lib/groq-whisper-transcription";
-import { isGroqConfigured } from "@/lib/groq-openai";
+import { groqTranscriptionVerboseBundle, isGroqWhisperConfigured } from "@/lib/groq-whisper-transcription";
 import { splitLessonSegmentsByJlptWordCuts, type TranscribedWord } from "@/lib/jlpt-listening-number-split";
 import {
   isOpenAiWhisperConfigured,
@@ -15,7 +14,7 @@ export const runtime = "nodejs";
 const MAX_BYTES = 25 * 1024 * 1024;
 
 function whisperBackendConfigured(): boolean {
-  return isOpenAiWhisperConfigured() || isGroqConfigured();
+  return isGroqWhisperConfigured() || isOpenAiWhisperConfigured();
 }
 
 /**
@@ -27,14 +26,15 @@ function whisperBackendConfigured(): boolean {
  * Optional field `division`: `lesson` (default) = JLPT-style word cuts + smart-merge; `raw` = return Whisper’s
  * segment timestamps only (no extra divider pass — good for non-lesson audio).
  *
- * Uses OpenAI when `OPENAI_API_KEY` is set; otherwise Groq (`GROQ_API_KEY`).
+ * Tries Groq Whisper first when `GROQ_API_KEY` is set; on failure (or if Groq is not set), uses OpenAI when
+ * `OPENAI_API_KEY` is set.
  */
 export async function POST(req: Request) {
   if (!whisperBackendConfigured()) {
     return NextResponse.json(
       {
         error:
-          "Add OPENAI_API_KEY or GROQ_API_KEY to .env.local for phrase transcription. OpenAI is preferred when both are set. Restart the dev server after saving.",
+          "Add GROQ_API_KEY and/or OPENAI_API_KEY to .env.local for phrase transcription. Groq is tried first when both are set; OpenAI is the backup. Restart the dev server after saving.",
       },
       { status: 503 }
     );
@@ -68,24 +68,16 @@ export async function POST(req: Request) {
     typeof divisionRaw !== "string" || divisionRaw.trim().toLowerCase() !== "raw";
 
   const nameGuess = file instanceof File ? file.name : "audio.wav";
+  const audioBlob: Blob = file;
 
   try {
-    let raw: LessonTimedSegment[];
+    let raw: LessonTimedSegment[] = [];
     let fullText = "";
     let words: TranscribedWord[] | undefined;
 
-    if (isOpenAiWhisperConfigured()) {
-      const o = await openaiTranscriptionLessonSegments({
-        file,
-        filename: nameGuess,
-        language,
-      });
-      raw = o.segments;
-      fullText = o.fullText ?? raw.map((s) => s.text).join("");
-      words = o.words;
-    } else {
+    async function transcribeFromGroq(): Promise<void> {
       const g = await groqTranscriptionVerboseBundle({
-        file,
+        file: audioBlob,
         filename: nameGuess,
         language,
       });
@@ -96,6 +88,35 @@ export async function POST(req: Request) {
       }));
       fullText = g.fullText || raw.map((s) => s.text).join("");
       words = g.words;
+    }
+
+    async function transcribeFromOpenAi(): Promise<void> {
+      const o = await openaiTranscriptionLessonSegments({
+        file: audioBlob,
+        filename: nameGuess,
+        language,
+      });
+      raw = o.segments;
+      fullText = o.fullText ?? raw.map((s) => s.text).join("");
+      words = o.words;
+    }
+
+    if (isGroqWhisperConfigured()) {
+      try {
+        await transcribeFromGroq();
+      } catch (groqErr) {
+        console.warn("[whisper-segments] Groq transcription failed:", groqErr);
+        if (isOpenAiWhisperConfigured()) {
+          console.warn("[whisper-segments] Falling back to OpenAI Whisper.");
+          await transcribeFromOpenAi();
+        } else {
+          throw groqErr;
+        }
+      }
+    } else if (isOpenAiWhisperConfigured()) {
+      await transcribeFromOpenAi();
+    } else {
+      throw new Error("No transcription backend configured.");
     }
 
     let merged: LessonTimedSegment[];
