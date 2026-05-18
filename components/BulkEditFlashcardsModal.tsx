@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toHiragana } from "wanakana";
 import {
   createFlashcard,
   deleteFlashcard,
@@ -10,10 +9,12 @@ import {
   reorderFlashcardsInSet,
   updateFlashcard,
 } from "@/lib/flashcards-repo";
-import { hasKanji } from "@/lib/japanese-tokens";
+import {
+  convertJapaneseFieldsToHiragana,
+  rowsHaveJapaneseForHiragana,
+  rowsNeedKanjiReadingForHiragana,
+} from "@/lib/flashcard-hiragana";
 import type { FlashcardDraft, FlashcardRow } from "@/lib/types";
-
-const BATCH_READING_CHUNK = 48;
 
 const DRAFT_PREFIX = "draft:";
 
@@ -290,18 +291,18 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
     return "";
   }, [rows, geminiReady]);
 
-  const needsAiForHiragana = useMemo(() => rows.some((r) => hasKanji(r.kana)), [rows]);
+  const needsAiForHiragana = useMemo(() => rowsNeedKanjiReadingForHiragana(rows), [rows]);
 
-  const canConvertKanaToHiragana = useMemo(() => {
-    if (!rows.some((r) => r.kana.trim())) return false;
+  const canConvertToHiragana = useMemo(() => {
+    if (!rowsHaveJapaneseForHiragana(rows)) return false;
     if (needsAiForHiragana && geminiReady !== true) return false;
     return true;
   }, [rows, needsAiForHiragana, geminiReady]);
 
   const hiraganaDisabledReason = useMemo(() => {
-    if (!rows.some((r) => r.kana.trim())) return "No kana text in any row.";
+    if (!rowsHaveJapaneseForHiragana(rows)) return "No kana or example text in any row.";
     if (needsAiForHiragana && geminiReady === false) {
-      return "Kanji in kana column needs AI keys (GEMINI, GROQ, or OPENAI) in .env.local.";
+      return "Kanji in kana or example needs AI keys (GEMINI, GROQ, or OPENAI) in .env.local.";
     }
     if (needsAiForHiragana && geminiReady === null) return "Checking AI configuration…";
     return "";
@@ -341,11 +342,9 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
         if (!ai) {
           throw new Error("No regenerated content returned.");
         }
-        setRows((prev) => {
-          const next = [...prev];
-          next[index] = mergeRegeneratedContent(next[index]!, ai);
-          return next;
-        });
+        const merged = rows.map((r, ri) => (ri === index ? mergeRegeneratedContent(r, ai) : r));
+        const converted = await convertJapaneseFieldsToHiragana(merged);
+        setRows(converted);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Regeneration failed.");
       } finally {
@@ -355,62 +354,14 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
     [rows, geminiReady]
   );
 
-  const runKanaColumnToHiragana = useCallback(async () => {
-    const localUpdates = new Map<number, string>();
-    const kanjiRowIndices: number[] = [];
-    const kanjiLines: string[] = [];
-
-    rows.forEach((row, i) => {
-      const k = row.kana.trim();
-      if (!k) return;
-      if (hasKanji(k)) {
-        kanjiRowIndices.push(i);
-        kanjiLines.push(k);
-      } else {
-        localUpdates.set(i, toHiragana(k));
-      }
-    });
-
-    if (localUpdates.size === 0 && kanjiLines.length === 0) return;
-    if (kanjiLines.length > 0 && geminiReady !== true) return;
+  const runJapaneseToHiragana = useCallback(async () => {
+    if (!rowsHaveJapaneseForHiragana(rows)) return;
+    if (rowsNeedKanjiReadingForHiragana(rows) && geminiReady !== true) return;
 
     setConvertingHiragana(true);
     setError(null);
     try {
-      const aiUpdates = new Map<number, string>();
-
-      for (let start = 0; start < kanjiLines.length; start += BATCH_READING_CHUNK) {
-        const chunkLines = kanjiLines.slice(start, start + BATCH_READING_CHUNK);
-        const chunkIndices = kanjiRowIndices.slice(start, start + BATCH_READING_CHUNK);
-
-        const res = await fetch("/api/japanese/batch-reading", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lines: chunkLines }),
-        });
-        const data = (await res.json()) as { readings?: string[]; error?: string };
-        if (!res.ok) {
-          throw new Error(data.error || "Hiragana conversion failed.");
-        }
-        const readings = data.readings;
-        if (!Array.isArray(readings) || readings.length !== chunkLines.length) {
-          throw new Error("Invalid hiragana response from server.");
-        }
-        chunkIndices.forEach((rowIndex, j) => {
-          const reading = (readings[j] ?? "").trim();
-          if (reading) aiUpdates.set(rowIndex, reading);
-        });
-      }
-
-      setRows((prev) =>
-        prev.map((row, i) => {
-          const fromAi = aiUpdates.get(i);
-          if (fromAi) return { ...row, kana: fromAi };
-          const fromLocal = localUpdates.get(i);
-          if (fromLocal) return { ...row, kana: fromLocal };
-          return row;
-        })
-      );
+      setRows(await convertJapaneseFieldsToHiragana(rows));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Hiragana conversion failed.");
     } finally {
@@ -472,13 +423,12 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
         throw new Error("Invalid response from server.");
       }
       const byId = new Map(list.map((r) => [r.id, r] as const));
-      setRows((prev) =>
-        prev.map((row) => {
-          const ai = byId.get(row.id);
-          if (!ai) return row;
-          return mergeEnrichment(row, ai);
-        })
-      );
+      const merged = rows.map((row) => {
+        const ai = byId.get(row.id);
+        if (!ai) return row;
+        return mergeEnrichment(row, ai);
+      });
+      setRows(await convertJapaneseFieldsToHiragana(merged));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Autofill failed.");
     } finally {
@@ -531,6 +481,24 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
     setBusy(true);
     setError(null);
     try {
+      let rowsToSave = nonempty;
+      if (rowsHaveJapaneseForHiragana(nonempty)) {
+        if (rowsNeedKanjiReadingForHiragana(nonempty) && geminiReady !== true) {
+          setError(
+            geminiReady === false
+              ? "Example or kana still has kanji. Add AI keys in .env.local or use Kana & example → hiragana first."
+              : "Checking AI configuration for hiragana conversion…"
+          );
+          setBusy(false);
+          return;
+        }
+        rowsToSave = await convertJapaneseFieldsToHiragana(nonempty);
+        setRows((prev) => {
+          const byId = new Map(rowsToSave.map((r) => [r.id, r]));
+          return prev.map((r) => byId.get(r.id) ?? r);
+        });
+      }
+
       const emptyRealIds = emptyRows.map((r) => r.id).filter((id) => !isDraftId(id));
       if (emptyRealIds.length) {
         await deleteFlashcards(emptyRealIds);
@@ -538,16 +506,16 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
       }
 
       const idMap = new Map<string, string>();
-      for (const row of nonempty) {
+      for (const row of rowsToSave) {
         if (isDraftId(row.id)) {
           const newId = await createFlashcard(setId, rowDraftToFlashcardPatch(row), 0);
           idMap.set(row.id, newId);
         }
       }
 
-      const resolvedIds = nonempty.map((r) => idMap.get(r.id) ?? r.id);
+      const resolvedIds = rowsToSave.map((r) => idMap.get(r.id) ?? r.id);
 
-      for (const row of nonempty) {
+      for (const row of rowsToSave) {
         if (isDraftId(row.id)) continue;
         const id = row.id;
         const patch = rowDraftToFlashcardPatch(row);
@@ -619,11 +587,11 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
             <button
               type="button"
               className={btnSecondary}
-              disabled={busy || regeneratingId !== null || convertingHiragana || !canConvertKanaToHiragana}
-              title={!canConvertKanaToHiragana ? hiraganaDisabledReason : undefined}
-              onClick={() => void runKanaColumnToHiragana()}
+              disabled={busy || regeneratingId !== null || convertingHiragana || !canConvertToHiragana}
+              title={!canConvertToHiragana ? hiraganaDisabledReason : undefined}
+              onClick={() => void runJapaneseToHiragana()}
             >
-              {convertingHiragana ? "Converting…" : "Kana → hiragana"}
+              {convertingHiragana ? "Converting…" : "Kana & example → hiragana"}
             </button>
             {geminiReady === false && (
               <span className="text-xs text-amber-800">
@@ -680,7 +648,7 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
                   Context
                 </th>
                 <th scope="col" className="min-w-[8rem] whitespace-nowrap px-2 py-2 font-semibold text-neutral-600">
-                  Example
+                  Example <span className="font-normal text-neutral-400">(hiragana)</span>
                 </th>
                 <th scope="col" className="min-w-[8rem] whitespace-nowrap px-2 py-2 font-semibold text-neutral-600">
                   Ex. translation
@@ -816,8 +784,11 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
                   </td>
                   <td className="px-1 py-1 align-top">
                     <textarea
+                      lang="ja"
                       rows={2}
                       spellCheck={false}
+                      autoComplete="off"
+                      placeholder="ひらがなで例文"
                       className={`${cell} resize-y bg-pink-50/40`}
                       value={row.example_sentence}
                       onChange={(e) => updateCell(i, "example_sentence", e.target.value)}

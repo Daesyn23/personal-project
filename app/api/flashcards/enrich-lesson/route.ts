@@ -51,7 +51,7 @@ Schema:
 }
 
 Rules for EACH input item (matched by "id"):
-- "example_sentence": **fresh** natural Japanese sentence using the vocabulary (です／ます or plain as fits); classroom-appropriate; avoid repeating the same scenario pattern across items in one batch when possible.
+- "example_sentence": **fresh** natural Japanese sentence using the vocabulary (です／ます or plain as fits); classroom-appropriate; avoid repeating the same scenario pattern across items in one batch when possible. **Hiragana only** — no kanji.
 - "example_translation": English gloss of the example only.
 - "teacher_research": follow the **teacher_research (MANDATORY LANGUAGE)** block exactly — Taglish, 5–10 sentences, cultural + historical facts when relevant.
 - Output one object per input id, same order as the input list, same ids — no extras, no omissions.
@@ -88,7 +88,7 @@ Rules for EACH input item (matched by "id"):
   - **II** = Group II (ichidan / 一段).
   - **III** = Group III: する, くる, and ～する compounds (e.g. しょうかいします).
   - If the headword is **not** a classified verb (e.g. bare noun with no group), set category_label to **null**.
-- "example_sentence": natural Japanese sentence using the vocabulary (です／ます or plain as fits the item); keep it classroom-appropriate.
+- "example_sentence": natural Japanese sentence using the vocabulary (です／ます or plain as fits the item); keep it classroom-appropriate. **Hiragana only** — no kanji.
 - "example_translation": English gloss of the example only.
 - "teacher_research": follow the **teacher_research (MANDATORY LANGUAGE)** block at the top of this prompt exactly — Taglish with Tagalog in every sentence; never English-only prose.
 - Output one object per input id, same order as the input list, same ids — no extras, no omissions.

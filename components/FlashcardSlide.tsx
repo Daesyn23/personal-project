@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { FlashcardRow } from "@/lib/types";
 import type { PresentationPhase } from "@/components/presentation-phase";
-import { japaneseLine } from "@/components/presentation-phase";
+import { japaneseLine, textForFlashcardSpeech } from "@/components/presentation-phase";
 import { cancelSpeechSynthesis, speakEnglishLine, speakJapaneseLine } from "@/lib/japanese-tts";
 import { useSpeechActivationHandlers } from "@/lib/useSpeechActivationHandlers";
 
@@ -201,14 +201,16 @@ export const FlashcardSlide = forwardRef<FlashcardSlideHandle, Props>(function F
     lastSpeakKeyRef.current = key;
   }, [card.id, phase]);
 
-  const canSpeak = Boolean(
-    ttsSupported && (jpLine?.trim() || card.phonetic_reading?.trim() || (card.definition ?? "").trim())
-  );
+  const jpSpeak = jpLine ? textForFlashcardSpeech(jpLine) : "";
+  const romajiSpeak = card.phonetic_reading ? textForFlashcardSpeech(card.phonetic_reading) : "";
+  const glossSpeak = card.definition ? textForFlashcardSpeech(card.definition) : "";
+
+  const canSpeak = Boolean(ttsSupported && (jpSpeak || romajiSpeak || glossSpeak));
 
   const startSpeak = useCallback(() => {
-    const jp = jpLine?.trim();
-    const romaji = card.phonetic_reading?.trim();
-    const gloss = (card.definition ?? "").trim();
+    const jp = jpSpeak;
+    const romaji = romajiSpeak;
+    const gloss = glossSpeak;
     setTtsHint(null);
     const onErr = (code?: string) => {
       setSpeaking(false);
@@ -242,7 +244,7 @@ export const FlashcardSlide = forwardRef<FlashcardSlideHandle, Props>(function F
     } else {
       setSpeaking(false);
     }
-  }, [card.definition, card.phonetic_reading, jpLine]);
+  }, [glossSpeak, jpSpeak, romajiSpeak]);
 
   const handleSpeakToggle = useCallback(() => {
     if (speaking) {
