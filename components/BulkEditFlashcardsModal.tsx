@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toHiragana } from "wanakana";
 import {
   createFlashcard,
   deleteFlashcard,
@@ -9,7 +10,10 @@ import {
   reorderFlashcardsInSet,
   updateFlashcard,
 } from "@/lib/flashcards-repo";
+import { hasKanji } from "@/lib/japanese-tokens";
 import type { FlashcardDraft, FlashcardRow } from "@/lib/types";
+
+const BATCH_READING_CHUNK = 48;
 
 const DRAFT_PREFIX = "draft:";
 
@@ -155,6 +159,46 @@ function mergeEnrichment(row: RowDraft, ai: EnrichResultRow): RowDraft {
   };
 }
 
+function mergeRegeneratedContent(row: RowDraft, ai: EnrichResultRow): RowDraft {
+  const use = (incoming: string | null | undefined, existing: string) => {
+    const t = (incoming ?? "").trim();
+    return t || existing;
+  };
+  return {
+    ...row,
+    example_sentence: use(ai.example_sentence, row.example_sentence),
+    example_translation: use(ai.example_translation, row.example_translation),
+    teacher_research: use(ai.teacher_research, row.teacher_research),
+  };
+}
+
+/** Saved card with kana + English — eligible for per-row example/research regeneration. */
+function rowCanRegenerate(row: RowDraft): boolean {
+  return !isDraftId(row.id) && Boolean(row.kana.trim() && row.definition.trim());
+}
+
+function IconRegenerate() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
+    </svg>
+  );
+}
+
 function IconTrash() {
   return (
     <svg
@@ -192,6 +236,9 @@ const cell =
 const iconDelete =
   "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-rose-200/90 text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:pointer-events-none disabled:opacity-40";
 
+const iconRegenerate =
+  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-200/90 text-violet-700 transition hover:border-violet-300 hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 disabled:pointer-events-none disabled:opacity-40";
+
 const btnSecondary =
   "inline-flex min-h-[36px] items-center justify-center rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-800 shadow-sm transition hover:bg-pink-50 disabled:pointer-events-none disabled:opacity-45";
 
@@ -204,6 +251,8 @@ const gripHandle =
 export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCardsRemoved }: Props) {
   const [rows, setRows] = useState<RowDraft[]>(() => rowsFromCards(cards));
   const [busy, setBusy] = useState(false);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [convertingHiragana, setConvertingHiragana] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [geminiReady, setGeminiReady] = useState<boolean | null>(null);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
@@ -239,6 +288,134 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
       return "All target fields are already filled (romaji, group, example, translation, teacher research), or new rows need a saved card id for autofill.";
     }
     return "";
+  }, [rows, geminiReady]);
+
+  const needsAiForHiragana = useMemo(() => rows.some((r) => hasKanji(r.kana)), [rows]);
+
+  const canConvertKanaToHiragana = useMemo(() => {
+    if (!rows.some((r) => r.kana.trim())) return false;
+    if (needsAiForHiragana && geminiReady !== true) return false;
+    return true;
+  }, [rows, needsAiForHiragana, geminiReady]);
+
+  const hiraganaDisabledReason = useMemo(() => {
+    if (!rows.some((r) => r.kana.trim())) return "No kana text in any row.";
+    if (needsAiForHiragana && geminiReady === false) {
+      return "Kanji in kana column needs AI keys (GEMINI, GROQ, or OPENAI) in .env.local.";
+    }
+    if (needsAiForHiragana && geminiReady === null) return "Checking AI configuration…";
+    return "";
+  }, [rows, needsAiForHiragana, geminiReady]);
+
+  const runRegenerateRow = useCallback(
+    async (index: number) => {
+      const row = rows[index];
+      if (!row || !rowCanRegenerate(row) || geminiReady !== true) return;
+
+      setRegeneratingId(row.id);
+      setError(null);
+      try {
+        const res = await fetch("/api/flashcards/enrich-lesson", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "regenerate",
+            cards: [
+              {
+                id: row.id,
+                kana: row.kana.trim(),
+                definition: row.definition.trim(),
+              },
+            ],
+          }),
+        });
+        const data = (await res.json()) as { results?: EnrichResultRow[]; error?: string };
+        if (!res.ok) {
+          throw new Error(data.error || "Regeneration failed.");
+        }
+        const list = data.results;
+        if (!Array.isArray(list) || list.length === 0) {
+          throw new Error("Invalid response from server.");
+        }
+        const ai = list.find((r) => r.id === row.id) ?? list[0];
+        if (!ai) {
+          throw new Error("No regenerated content returned.");
+        }
+        setRows((prev) => {
+          const next = [...prev];
+          next[index] = mergeRegeneratedContent(next[index]!, ai);
+          return next;
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Regeneration failed.");
+      } finally {
+        setRegeneratingId(null);
+      }
+    },
+    [rows, geminiReady]
+  );
+
+  const runKanaColumnToHiragana = useCallback(async () => {
+    const localUpdates = new Map<number, string>();
+    const kanjiRowIndices: number[] = [];
+    const kanjiLines: string[] = [];
+
+    rows.forEach((row, i) => {
+      const k = row.kana.trim();
+      if (!k) return;
+      if (hasKanji(k)) {
+        kanjiRowIndices.push(i);
+        kanjiLines.push(k);
+      } else {
+        localUpdates.set(i, toHiragana(k));
+      }
+    });
+
+    if (localUpdates.size === 0 && kanjiLines.length === 0) return;
+    if (kanjiLines.length > 0 && geminiReady !== true) return;
+
+    setConvertingHiragana(true);
+    setError(null);
+    try {
+      const aiUpdates = new Map<number, string>();
+
+      for (let start = 0; start < kanjiLines.length; start += BATCH_READING_CHUNK) {
+        const chunkLines = kanjiLines.slice(start, start + BATCH_READING_CHUNK);
+        const chunkIndices = kanjiRowIndices.slice(start, start + BATCH_READING_CHUNK);
+
+        const res = await fetch("/api/japanese/batch-reading", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lines: chunkLines }),
+        });
+        const data = (await res.json()) as { readings?: string[]; error?: string };
+        if (!res.ok) {
+          throw new Error(data.error || "Hiragana conversion failed.");
+        }
+        const readings = data.readings;
+        if (!Array.isArray(readings) || readings.length !== chunkLines.length) {
+          throw new Error("Invalid hiragana response from server.");
+        }
+        chunkIndices.forEach((rowIndex, j) => {
+          const reading = (readings[j] ?? "").trim();
+          if (reading) aiUpdates.set(rowIndex, reading);
+        });
+      }
+
+      setRows((prev) =>
+        prev.map((row, i) => {
+          const fromAi = aiUpdates.get(i);
+          if (fromAi) return { ...row, kana: fromAi };
+          const fromLocal = localUpdates.get(i);
+          if (fromLocal) return { ...row, kana: fromLocal };
+          return row;
+        })
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Hiragana conversion failed.");
+    } finally {
+      setConvertingHiragana(false);
+    }
   }, [rows, geminiReady]);
 
   const hasPendingChanges = useMemo(() => {
@@ -416,7 +593,9 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
             delete it) or use the trash icon.{" "}
             <strong className="font-semibold text-neutral-700">Teacher research</strong> is prep only and never appears
             on presentation slides. AI fills it in <strong className="font-semibold text-neutral-700">Taglish</strong>{" "}
-            (Tagalog–English mix); clear the cell and run autofill again to regenerate.
+            (cultural and historical notes, 5–10 sentences). Use the per-row{" "}
+            <strong className="font-semibold text-neutral-700">regenerate</strong> button to refresh example, translation,
+            and teacher research.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
@@ -431,11 +610,20 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
             <button
               type="button"
               className={btnSecondary}
-              disabled={busy || !canAutofill}
+              disabled={busy || regeneratingId !== null || convertingHiragana || !canAutofill}
               title={!canAutofill ? autofillDisabledReason : undefined}
               onClick={() => void runAutofill()}
             >
               {busy ? "Working…" : "Autofill empty fields (AI)"}
+            </button>
+            <button
+              type="button"
+              className={btnSecondary}
+              disabled={busy || regeneratingId !== null || convertingHiragana || !canConvertKanaToHiragana}
+              title={!canConvertKanaToHiragana ? hiraganaDisabledReason : undefined}
+              onClick={() => void runKanaColumnToHiragana()}
+            >
+              {convertingHiragana ? "Converting…" : "Kana → hiragana"}
             </button>
             {geminiReady === false && (
               <span className="text-xs text-amber-800">
@@ -502,6 +690,15 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
                 </th>
                 <th
                   scope="col"
+                  className="sticky right-[3rem] z-30 w-12 border-l border-pink-100 bg-gradient-to-b from-white to-pink-50/80 px-1 py-2 text-center font-semibold text-neutral-600"
+                >
+                  <span className="sr-only">Regenerate AI fields</span>
+                  <span aria-hidden title="Regenerate example, translation, teacher research">
+                    ↻
+                  </span>
+                </th>
+                <th
+                  scope="col"
                   className="sticky right-0 z-30 w-12 border-l border-pink-100 bg-gradient-to-b from-white to-pink-50/80 px-1 py-2 pr-3 text-center font-semibold text-neutral-600"
                 >
                   <span className="sr-only">Delete</span>
@@ -513,13 +710,13 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
                 <tr
                   key={row.id}
                   onDragOver={(e) => {
-                    if (busy) return;
+                    if (busy || regeneratingId !== null || convertingHiragana) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
                     setDragOverIndex(i);
                   }}
                   onDrop={(e) => {
-                    if (busy) return;
+                    if (busy || regeneratingId !== null || convertingHiragana) return;
                     e.preventDefault();
                     const raw = e.dataTransfer.getData("text/plain");
                     const from = parseInt(raw, 10);
@@ -540,8 +737,8 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
                   <td className="sticky left-0 z-10 border-r border-pink-100/80 bg-white px-1 py-1 align-middle even:bg-[#fffafc]">
                     <div className="flex flex-col items-center gap-1">
                       <div
-                        className={`${gripHandle} ${busy ? "pointer-events-none opacity-40" : ""}`}
-                        draggable={!busy}
+                        className={`${gripHandle} ${busy || regeneratingId !== null || convertingHiragana ? "pointer-events-none opacity-40" : ""}`}
+                        draggable={!busy && regeneratingId === null && !convertingHiragana}
                         onDragStart={(e) => {
                           e.dataTransfer.setData("text/plain", String(i));
                           e.dataTransfer.effectAllowed = "move";
@@ -644,13 +841,43 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
                       onChange={(e) => updateCell(i, "teacher_research", e.target.value)}
                     />
                   </td>
+                  <td className="sticky right-[3rem] z-10 w-12 border-l border-pink-100/80 bg-white px-1 py-1 align-middle even:bg-[#fffafc]">
+                    <button
+                      type="button"
+                      className={iconRegenerate}
+                      aria-label="Regenerate example, translation, and teacher research"
+                      title={
+                        !rowCanRegenerate(row)
+                          ? "Save the card first and enter kana + English to regenerate"
+                          : geminiReady !== true
+                            ? autofillDisabledReason || "AI not configured"
+                            : "Regenerate example, translation, and teacher research (AI)"
+                      }
+                      disabled={
+                        busy ||
+                        regeneratingId !== null ||
+                        convertingHiragana ||
+                        !rowCanRegenerate(row) ||
+                        geminiReady !== true
+                      }
+                      onClick={() => void runRegenerateRow(i)}
+                    >
+                      {regeneratingId === row.id ? (
+                        <span className="text-[0.65rem] font-semibold" aria-hidden>
+                          …
+                        </span>
+                      ) : (
+                        <IconRegenerate />
+                      )}
+                    </button>
+                  </td>
                   <td className="sticky right-0 z-10 w-12 border-l border-pink-100/80 bg-white px-1 py-1 align-middle even:bg-[#fffafc]">
                     <button
                       type="button"
                       className={iconDelete}
                       aria-label="Delete card"
                       title="Delete card"
-                      disabled={busy}
+                      disabled={busy || regeneratingId !== null || convertingHiragana}
                       onClick={() => void removeRowByIcon(i)}
                     >
                       <IconTrash />
@@ -680,7 +907,7 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
           </button>
           <button
             type="button"
-            disabled={busy || !hasPendingChanges}
+            disabled={busy || regeneratingId !== null || convertingHiragana || !hasPendingChanges}
             onClick={() => void save()}
             className="rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50"
           >

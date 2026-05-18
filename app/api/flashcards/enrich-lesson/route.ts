@@ -19,15 +19,43 @@ const TEACHER_RESEARCH_TAGLISH_RULES = `**teacher_research (MANDATORY LANGUAGE �
 - Write **Taglish only**: natural **code-mix of Filipino/Tagalog + English** (Philippine classroom / teacher lounge style).
 - **FORBIDDEN**: paragraphs that are **English-only**. If the text could pass as a UK/US textbook footnote with zero Tagalog, it is **wrong**.
 - In **every sentence**, include **at least one** clear Tagalog/Filipino word or phrase (e.g. *ito, kasi, tandaan, halimbawa, pwede, importante, para sa, kailangan, ganito, ibig sabihin, mag-ingat, paliwanag*). Mix freely with English and Japanese terms.
-- 2–6 sentences. Prep notes for the teacher only — not for student slides.
+- **5–10 sentences** (substantive prep notes — not one-liners). For the teacher only — not for student slides.
+- **Include rich factual content** where it fits the headword (do not pad with fluff):
+  - **Cultural facts**: real-life usage in Japan, politeness/register, situations students confuse, contrast with Filipino habits or classroom pitfalls.
+  - **Historical facts**: kanji origin, word history, period or etymology notes when relevant (brief and accurate).
+  - **Teaching hooks**: mnemonics, common learner errors, comparisons to related words, what to demo in class.
 - OK to keep Japanese headwords and English grammar labels (*ichidan*, *particle*) where useful; the **prose around them must stay Taglish**.
-- If unsure, say so briefly **in Taglish** — do not invent facts.
+- If unsure about a fact, say so briefly **in Taglish** — do not invent history or culture.
 
 **Good example (shape + density of Tagalog — adapt content to each vocab item):**
-"Group II (ichidan) verb ito. Tandaan ang nuance: ang *wasuremasu* parang nakalimutan mo lang o naiwan — medyo absent-minded; ang *nakushimasu* mas parang nawala na talaga o 'di mo na mahanap. Halimbawa, naiwan mo ang wallet sa lamesa → *wasure*. Kung wala na sa mundo mo ang wallet → *nakushimasu* ang vibe. I-emphasize sa class ang 'carelessly' sa English definition para lumabas yung light na oversight."
+"Group II (ichidan) verb ito. Tandaan ang nuance: ang *wasuremasu* parang nakalimutan mo lang o naiwan — medyo absent-minded; ang *nakushimasu* mas parang nawala na talaga o 'di mo na mahanap. Halimbawa, naiwan mo ang wallet sa lamesa → *wasure*. Kung wala na sa mundo mo ang wallet → *nakushimasu* ang vibe. Sa kultura, mas natural sa daily convo ang *wasureta* kaysa formal textbook lines — i-demo mo yan. Historically, ang kanji 忘 ay 'forget' sa meaning cluster; hindi kailangan i-deep dive unless may time. I-emphasize sa class ang 'carelessly' sa English definition para lumabas yung light na oversight."
 
 **Bad example (do NOT do this — English-only):**
 "This is a Group II verb. The difference between wasuremasu and nakushimasu is key. Wasuremasu implies..."`;
+
+const SYSTEM_INSTRUCTION_REGENERATE = `You help Japanese teachers in the Philippines prepare vocabulary cards.
+You MUST reply with a single JSON object only. No markdown fences, no commentary outside JSON.
+
+${TEACHER_RESEARCH_TAGLISH_RULES}
+
+Schema:
+{
+  "results": [
+    {
+      "id": string,
+      "example_sentence": string | null,
+      "example_translation": string | null,
+      "teacher_research": string | null
+    }
+  ]
+}
+
+Rules for EACH input item (matched by "id"):
+- "example_sentence": **fresh** natural Japanese sentence using the vocabulary (です／ます or plain as fits); classroom-appropriate; avoid repeating the same scenario pattern across items in one batch when possible.
+- "example_translation": English gloss of the example only.
+- "teacher_research": follow the **teacher_research (MANDATORY LANGUAGE)** block exactly — Taglish, 5–10 sentences, cultural + historical facts when relevant.
+- Output one object per input id, same order as the input list, same ids — no extras, no omissions.
+- **Critical for "id"**: Copy each input **id** exactly (full UUID string). Do not renumber, shorten, or omit ids.`;
 
 const SYSTEM_INSTRUCTION = `You help Japanese teachers in the Philippines prepare vocabulary cards.
 You MUST reply with a single JSON object only. No markdown fences, no commentary outside JSON.
@@ -151,6 +179,8 @@ function parseModelJsonResponse(rawText: string): unknown {
   }
   throw new Error("Model did not return valid JSON.");
 }
+
+type EnrichMode = "fill" | "regenerate";
 
 type CardIn = { id: string; kana: string; definition: string };
 
@@ -313,6 +343,11 @@ export async function POST(req: Request) {
     );
   }
 
+  const rawMode = (body as { mode?: unknown }).mode;
+  const enrichMode: EnrichMode = rawMode === "regenerate" ? "regenerate" : "fill";
+  const systemInstruction =
+    enrichMode === "regenerate" ? SYSTEM_INSTRUCTION_REGENERATE : SYSTEM_INSTRUCTION;
+
   const genAI = geminiKey ? new GoogleGenerativeAI(geminiKey) : null;
   const primaryModel = resolveGeminiModelId(process.env.GEMINI_MODEL);
   const modelAttempts = geminiModelAttemptOrder(primaryModel);
@@ -321,18 +356,33 @@ export async function POST(req: Request) {
 
   for (let start = 0; start < cards.length; start += CHUNK_SIZE) {
     const chunk = cards.slice(start, start + CHUNK_SIZE);
-    const userBlock = [
-      "Generate fields for each vocabulary item below. Return JSON only.",
-      "Each output object must use the same id string as the matching input line (copy the UUID exactly).",
-      "",
-      "REMINDER — teacher_research: TAGLISH ONLY (Filipino/Tagalog mixed with English). Each sentence must contain Tagalog words. English-only teacher_research is invalid.",
-      "",
-      JSON.stringify(
-        chunk.map((c) => ({ id: c.id, kana: c.kana, english: c.definition })),
-        null,
-        0
-      ),
-    ].join("\n");
+    const userBlock =
+      enrichMode === "regenerate"
+        ? [
+            "Regenerate example_sentence, example_translation, and teacher_research for each vocabulary item below. Return JSON only.",
+            "Each output object must use the same id string as the matching input line (copy the UUID exactly).",
+            "Write a new example scenario when possible — do not copy generic textbook filler.",
+            "",
+            "REMINDER — teacher_research: TAGLISH ONLY; 5–10 sentences; include cultural and historical facts where relevant.",
+            "",
+            JSON.stringify(
+              chunk.map((c) => ({ id: c.id, kana: c.kana, english: c.definition })),
+              null,
+              0
+            ),
+          ].join("\n")
+        : [
+            "Generate fields for each vocabulary item below. Return JSON only.",
+            "Each output object must use the same id string as the matching input line (copy the UUID exactly).",
+            "",
+            "REMINDER — teacher_research: TAGLISH ONLY (Filipino/Tagalog mixed with English). Each sentence must contain Tagalog words. English-only teacher_research is invalid. Include cultural and historical facts; 5–10 sentences.",
+            "",
+            JSON.stringify(
+              chunk.map((c) => ({ id: c.id, kana: c.kana, english: c.definition })),
+              null,
+              0
+            ),
+          ].join("\n");
 
     try {
       const { text: rawText } = await generateTextGeminiThenGroq({
@@ -343,7 +393,7 @@ export async function POST(req: Request) {
           if (!genAI) throw new Error("Gemini not configured");
           const model = genAI.getGenerativeModel({
             model: modelName,
-            systemInstruction: SYSTEM_INSTRUCTION,
+            systemInstruction,
             generationConfig: {
               responseMimeType: "application/json",
             },
@@ -356,7 +406,7 @@ export async function POST(req: Request) {
         },
         groq: {
           messages: [
-            { role: "system", content: SYSTEM_INSTRUCTION },
+            { role: "system", content: systemInstruction },
             { role: "user", content: userBlock },
           ],
           jsonMode: true,
