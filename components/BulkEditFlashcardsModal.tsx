@@ -161,15 +161,15 @@ function mergeEnrichment(row: RowDraft, ai: EnrichResultRow): RowDraft {
 }
 
 function mergeRegeneratedContent(row: RowDraft, ai: EnrichResultRow): RowDraft {
-  const use = (incoming: string | null | undefined, existing: string) => {
+  const preferIncoming = (incoming: string | null | undefined, existing: string) => {
     const t = (incoming ?? "").trim();
     return t || existing;
   };
   return {
     ...row,
-    example_sentence: use(ai.example_sentence, row.example_sentence),
-    example_translation: use(ai.example_translation, row.example_translation),
-    teacher_research: use(ai.teacher_research, row.teacher_research),
+    example_sentence: preferIncoming(ai.example_sentence, row.example_sentence),
+    example_translation: preferIncoming(ai.example_translation, row.example_translation),
+    teacher_research: preferIncoming(ai.teacher_research, row.teacher_research),
   };
 }
 
