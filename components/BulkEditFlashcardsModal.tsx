@@ -240,8 +240,11 @@ const iconDelete =
 const iconRegenerate =
   "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-200/90 text-violet-700 transition hover:border-violet-300 hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 disabled:pointer-events-none disabled:opacity-40";
 
-const btnSecondary =
-  "inline-flex min-h-[36px] items-center justify-center rounded-lg border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-800 shadow-sm transition hover:bg-pink-50 disabled:pointer-events-none disabled:opacity-45";
+const btnToolbar =
+  "inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-pink-300/90 bg-white px-3 py-2 text-xs font-semibold text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400/50 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:bg-neutral-50 disabled:text-neutral-500 disabled:shadow-none";
+
+const btnToolbarGhost =
+  "inline-flex min-h-9 shrink-0 cursor-pointer list-none items-center rounded-lg border border-transparent px-2 py-2 text-xs font-semibold text-pink-800 hover:bg-pink-50 hover:text-pink-900 [&::-webkit-details-marker]:hidden";
 
 const gripHandle =
   "flex cursor-grab select-none flex-col items-center justify-center rounded-lg border border-pink-200/80 bg-pink-50/50 px-1.5 py-2 text-pink-400 shadow-sm hover:bg-pink-100/60 active:cursor-grabbing";
@@ -541,6 +544,38 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
 
   const n = rows.length;
   const nonemptyCount = rows.filter((r) => !rowIsEmpty(r)).length;
+  const toolbarLocked = busy || regeneratingId !== null || convertingHiragana;
+
+  const toolbarHint = useMemo(() => {
+    if (convertingHiragana) return { text: "Converting kana & examples to hiragana…", tone: "info" as const };
+    if (busy) return { text: "Autofill or save in progress…", tone: "info" as const };
+    if (regeneratingId) return { text: "Regenerating example & research…", tone: "info" as const };
+    if (geminiReady === false && !toolbarLocked) {
+      return { text: "Add GEMINI, GROQ, or OPENAI API key in .env.local for AI.", tone: "warn" as const };
+    }
+    if (!toolbarLocked && canAutofill) {
+      return { text: "Autofill fills empty fields only — verify before class.", tone: "muted" as const };
+    }
+    if (!toolbarLocked && autofillDisabledReason && geminiReady !== false) {
+      return { text: autofillDisabledReason, tone: "muted" as const };
+    }
+    return null;
+  }, [
+    autofillDisabledReason,
+    busy,
+    canAutofill,
+    convertingHiragana,
+    geminiReady,
+    regeneratingId,
+    toolbarLocked,
+  ]);
+
+  const toolbarHintClass =
+    toolbarHint?.tone === "warn"
+      ? "text-amber-800"
+      : toolbarHint?.tone === "info"
+        ? "text-sky-800"
+        : "text-neutral-500";
 
   return (
     <div
@@ -551,65 +586,76 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
     >
       <div className="flex max-h-[92vh] w-full max-w-[min(96rem,calc(100vw-1.5rem))] flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
         <div className="shrink-0 border-b border-pink-100 px-4 py-3 sm:px-5 sm:py-4">
-          <h2 id="bulk-edit-title" className="text-lg font-semibold text-neutral-900">
-            Bulk edit ({n} row{n === 1 ? "" : "s"}, {nonemptyCount} with content)
-          </h2>
-          <p className="mt-1 text-sm text-neutral-500">
-            Each row is one card. Use <strong className="font-semibold text-neutral-700">Add row</strong> for new cards
-            and <strong className="font-semibold text-neutral-700">drag the handle</strong> in the first column to change
-            order (saved with the deck). English gloss and/or kana is required unless you clear the whole row (save will
-            delete it) or use the trash icon.{" "}
-            <strong className="font-semibold text-neutral-700">Teacher research</strong> is prep only and never appears
-            on presentation slides. AI fills it in <strong className="font-semibold text-neutral-700">Taglish</strong>{" "}
-            (cultural and historical notes, 5–10 sentences). Use the per-row{" "}
-            <strong className="font-semibold text-neutral-700">regenerate</strong> button to refresh example, translation,
-            and teacher research.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className={btnSecondary}
-              disabled={busy}
-              onClick={() => addRow(null)}
-              title="Append a new blank row at the end"
-            >
-              Add row
-            </button>
-            <button
-              type="button"
-              className={btnSecondary}
-              disabled={busy || regeneratingId !== null || convertingHiragana || !canAutofill}
-              title={!canAutofill ? autofillDisabledReason : undefined}
-              onClick={() => void runAutofill()}
-            >
-              {busy ? "Working…" : "Autofill empty fields (AI)"}
-            </button>
-            <button
-              type="button"
-              className={btnSecondary}
-              disabled={busy || regeneratingId !== null || convertingHiragana || !canConvertToHiragana}
-              title={!canConvertToHiragana ? hiraganaDisabledReason : undefined}
-              onClick={() => void runJapaneseToHiragana()}
-            >
-              {convertingHiragana ? "Converting…" : "Kana & example → hiragana"}
-            </button>
-            {geminiReady === false && (
-              <span className="text-xs text-amber-800">
-                Add <code className="rounded bg-amber-100 px-1">GEMINI_API_KEY</code>,{" "}
-                <code className="rounded bg-amber-100 px-1">GROQ_API_KEY</code>, or{" "}
-                <code className="rounded bg-amber-100 px-1">OPENAI_API_KEY</code> to{" "}
-                <code className="rounded bg-amber-100 px-1">.env.local</code> for AI.
-              </span>
-            )}
-            {!busy && canAutofill && (
-              <span className="text-xs text-neutral-500">
-                Fills only empty romaji, group, example, translation, and teacher research. AI may be inaccurate —
-                verify before class.
-              </span>
-            )}
-            {!busy && !canAutofill && autofillDisabledReason && geminiReady !== false && (
-              <span className="text-xs text-neutral-500">{autofillDisabledReason}</span>
-            )}
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <h2 id="bulk-edit-title" className="text-lg font-semibold text-neutral-900">
+              Bulk edit
+            </h2>
+            <p className="text-sm tabular-nums text-neutral-500">
+              {n} row{n === 1 ? "" : "s"} · {nonemptyCount} with content
+            </p>
+          </div>
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-2">
+            <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Bulk edit actions">
+              <button
+                type="button"
+                className={btnToolbar}
+                disabled={toolbarLocked}
+                onClick={() => addRow(null)}
+                title="Append a new blank row at the end"
+              >
+                Add row
+              </button>
+              <button
+                type="button"
+                className={btnToolbar}
+                disabled={toolbarLocked || !canAutofill}
+                title={
+                  !canAutofill
+                    ? autofillDisabledReason
+                    : "Fill empty romaji, group, example, translation, and teacher research"
+                }
+                onClick={() => void runAutofill()}
+              >
+                Autofill empty (AI)
+              </button>
+              <button
+                type="button"
+                className={btnToolbar}
+                disabled={toolbarLocked || !canConvertToHiragana}
+                title={!canConvertToHiragana ? hiraganaDisabledReason : "Convert kana and example columns to hiragana"}
+                onClick={() => void runJapaneseToHiragana()}
+              >
+                <span className="sm:hidden">→ Hiragana</span>
+                <span className="hidden sm:inline">Kana & example → hiragana</span>
+              </button>
+            </div>
+
+            <details className="relative shrink-0">
+              <summary className={btnToolbarGhost}>How to use</summary>
+              <ul className="absolute left-0 top-full z-40 mt-1 w-[min(20rem,calc(100vw-2rem))] list-disc space-y-1.5 rounded-lg border border-pink-100 bg-white py-2.5 pl-8 pr-3 text-xs leading-relaxed text-neutral-600 shadow-lg">
+                <li>
+                  <strong className="font-medium text-neutral-800">Add row</strong> or drag the handle to reorder.
+                </li>
+                <li>Gloss and/or kana required. Clear a row to delete on save, or use trash.</li>
+                <li>
+                  <strong className="font-medium text-neutral-800">Example</strong> — hiragana (auto on save).
+                </li>
+                <li>
+                  <strong className="font-medium text-neutral-800">Teacher research</strong> — prep only; use ↻ to
+                  regenerate.
+                </li>
+              </ul>
+            </details>
+
+            {toolbarHint ? (
+              <p
+                className={`min-w-0 flex-1 basis-48 text-[0.7rem] leading-snug sm:text-xs ${toolbarHintClass}`}
+                role="status"
+              >
+                {toolbarHint.text}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -860,15 +906,15 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
           </table>
         </div>
 
-        {error && (
-          <div className="shrink-0 border-t border-pink-100 px-4 py-2">
-            <p className="text-sm text-red-600" role="alert">
+        {error ? (
+          <div className="shrink-0 border-t border-rose-100 bg-rose-50/60 px-4 py-2.5 sm:px-5">
+            <p className="text-sm font-medium text-rose-800" role="alert">
               {error}
             </p>
           </div>
-        )}
+        ) : null}
 
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-pink-100 px-4 py-3 sm:px-5">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-pink-100 bg-neutral-50/40 px-4 py-3 sm:px-5">
           <button
             type="button"
             onClick={onClose}
