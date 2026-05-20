@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { listFlashcardsInSet } from "@/lib/flashcards-repo";
 import type { FlashcardRow } from "@/lib/types";
 
@@ -68,10 +69,15 @@ export function WorkspaceLessonPlanSection({ activeSetId, setTitle }: Props) {
       <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-pink-100/90 bg-white/95 p-5 shadow-sm ring-1 ring-rose-50/60 print:border-neutral-300 print:shadow-none">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-pink-600/90">Lesson plan</p>
-          <h2 className="mt-1 text-xl font-bold text-neutral-900 print:text-black">{setTitle ?? "Set"}</h2>
-          <p className="mt-2 max-w-2xl text-sm text-neutral-600 print:text-neutral-800">
+          <HeadingWithInfo
+            className="no-print"
+            infoLabel="Lesson plan"
+            heading={
+              <h2 className="mt-1 text-xl font-bold text-neutral-900 print:text-black">{setTitle ?? "Set"}</h2>
+            }
+          >
             Teacher research and notes are not shown on flashcard slides. Use this page to review or print before class.
-          </p>
+          </HeadingWithInfo>
         </div>
         <button
           type="button"

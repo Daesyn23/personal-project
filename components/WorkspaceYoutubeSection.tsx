@@ -1,5 +1,6 @@
 "use client";
 
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   JLPT_YOUTUBE_PLAYLISTS,
@@ -615,12 +616,22 @@ export function WorkspaceYoutubeSection() {
               </span>
             ) : null}
           </div>
-          <h2 className="mt-2 text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl">Video Lessons</h2>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-600">
-            {folder === null
-              ? "Pick a JLPT folder to load its playlist. Video stays in this workspace — no extra tabs needed."
-              : "Switch folders, sort or search lessons, and page through long playlists with the controls below."}
-          </p>
+          <HeadingWithInfo
+            className="mt-2"
+            infoLabel="Video lessons"
+            heading={
+              <h2 className="text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl">Video Lessons</h2>
+            }
+          >
+            {folder === null ? (
+              <p>
+                Pick a JLPT folder to load its playlist. Video stays in this workspace — no extra tabs needed. After
+                you open a folder, use sort and search to find lessons quickly.
+              </p>
+            ) : (
+              <p>Switch folders, sort or search lessons, and page through long playlists with the controls below.</p>
+            )}
+          </HeadingWithInfo>
 
           <div
             className={
@@ -642,11 +653,6 @@ export function WorkspaceYoutubeSection() {
             ))}
           </div>
 
-          {folder === null ? (
-            <p className="mt-6 rounded-2xl border border-dashed border-pink-200/90 bg-white/50 px-4 py-3 text-xs text-neutral-600 backdrop-blur-sm">
-              <span className="font-semibold text-pink-800">Tip:</span> After you open a folder, use sort and search to find lessons quickly.
-            </p>
-          ) : null}
         </div>
       </div>
 

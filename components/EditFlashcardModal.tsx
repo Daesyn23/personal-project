@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { deleteFlashcard, updateFlashcard } from "@/lib/flashcards-repo";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import type { FlashcardRow } from "@/lib/types";
 
 type Props = {
@@ -92,12 +93,17 @@ export function EditFlashcardModal({ card, onClose, onSaved, onDeleted }: Props)
     >
       <div className="flex max-h-[90dvh] w-full min-w-0 max-w-lg flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
         <div className="border-b border-pink-100 px-5 py-4">
-          <h2 id="edit-card-title" className="text-lg font-semibold text-neutral-900">
-            Edit card
-          </h2>
-          <p className="mt-1 text-sm text-neutral-500">
+          <HeadingWithInfo
+            align="center"
+            infoLabel="Edit card fields"
+            heading={
+              <h2 id="edit-card-title" className="text-lg font-semibold text-neutral-900">
+                Edit card
+              </h2>
+            }
+          >
             Slide 1: romaji + kana (+ group). Slide 2: English, note, examples.
-          </p>
+          </HeadingWithInfo>
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-5">
           <div className="grid gap-3">

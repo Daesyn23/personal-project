@@ -9,6 +9,7 @@ import {
   reorderFlashcardsInSet,
   updateFlashcard,
 } from "@/lib/flashcards-repo";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import {
   convertJapaneseFieldsToHiragana,
   rowsHaveJapaneseForHiragana,
@@ -242,9 +243,6 @@ const iconRegenerate =
 
 const btnToolbar =
   "inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-pink-300/90 bg-white px-3 py-2 text-xs font-semibold text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400/50 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:bg-neutral-50 disabled:text-neutral-500 disabled:shadow-none";
-
-const btnToolbarGhost =
-  "inline-flex min-h-9 shrink-0 cursor-pointer list-none items-center rounded-lg border border-transparent px-2 py-2 text-xs font-semibold text-pink-800 hover:bg-pink-50 hover:text-pink-900 [&::-webkit-details-marker]:hidden";
 
 const gripHandle =
   "flex cursor-grab select-none flex-col items-center justify-center rounded-lg border border-pink-200/80 bg-pink-50/50 px-1.5 py-2 text-pink-400 shadow-sm hover:bg-pink-100/60 active:cursor-grabbing";
@@ -586,10 +584,30 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
     >
       <div className="flex max-h-[92vh] w-full max-w-[min(96rem,calc(100vw-1.5rem))] flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
         <div className="shrink-0 border-b border-pink-100 px-4 py-3 sm:px-5 sm:py-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h2 id="bulk-edit-title" className="text-lg font-semibold text-neutral-900">
-              Bulk edit
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <HeadingWithInfo
+              align="center"
+              infoLabel="How bulk edit works"
+              heading={
+                <h2 id="bulk-edit-title" className="text-lg font-semibold text-neutral-900">
+                  Bulk edit
+                </h2>
+              }
+            >
+              <ul className="list-disc space-y-1.5 pl-4">
+                <li>
+                  <strong className="font-medium text-neutral-800">Add row</strong> or drag the handle to reorder.
+                </li>
+                <li>Gloss and/or kana required. Clear a row to delete on save, or use trash.</li>
+                <li>
+                  <strong className="font-medium text-neutral-800">Example</strong> — hiragana (auto on save).
+                </li>
+                <li>
+                  <strong className="font-medium text-neutral-800">Teacher research</strong> — prep only; use ↻ to
+                  regenerate.
+                </li>
+              </ul>
+            </HeadingWithInfo>
             <p className="text-sm tabular-nums text-neutral-500">
               {n} row{n === 1 ? "" : "s"} · {nonemptyCount} with content
             </p>
@@ -630,23 +648,6 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
                 <span className="hidden sm:inline">Kana & example → hiragana</span>
               </button>
             </div>
-
-            <details className="relative shrink-0">
-              <summary className={btnToolbarGhost}>How to use</summary>
-              <ul className="absolute left-0 top-full z-40 mt-1 w-[min(20rem,calc(100vw-2rem))] list-disc space-y-1.5 rounded-lg border border-pink-100 bg-white py-2.5 pl-8 pr-3 text-xs leading-relaxed text-neutral-600 shadow-lg">
-                <li>
-                  <strong className="font-medium text-neutral-800">Add row</strong> or drag the handle to reorder.
-                </li>
-                <li>Gloss and/or kana required. Clear a row to delete on save, or use trash.</li>
-                <li>
-                  <strong className="font-medium text-neutral-800">Example</strong> — hiragana (auto on save).
-                </li>
-                <li>
-                  <strong className="font-medium text-neutral-800">Teacher research</strong> — prep only; use ↻ to
-                  regenerate.
-                </li>
-              </ul>
-            </details>
 
             {toolbarHint ? (
               <p

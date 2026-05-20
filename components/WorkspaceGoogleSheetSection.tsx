@@ -7,6 +7,7 @@ import type {
 } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { SavedGoogleSheetCard } from "@/components/SavedGoogleSheetCard";
 import { emptyCellPayload, type SheetCellPayload } from "@/lib/google-sheets-grid-parse";
 import {
@@ -1559,9 +1560,18 @@ export function WorkspaceGoogleSheetSection() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-wider text-pink-600/90">Google Sheets</p>
-                  <h2 className="mt-0.5 bg-gradient-to-r from-pink-700 via-rose-600 to-pink-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-3xl">
-                    Saved sheets
-                  </h2>
+                  <HeadingWithInfo
+                    className="mt-0.5"
+                    infoLabel="Linked Google Sheets"
+                    heading={
+                      <h2 className="bg-gradient-to-r from-pink-700 via-rose-600 to-pink-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-3xl">
+                        Saved sheets
+                      </h2>
+                    }
+                  >
+                    Save multiple spreadsheet links (like flashcard collections) and open the one you need. Range and tab
+                    choices stay with each link.
+                  </HeadingWithInfo>
                 </div>
                 <button
                   type="button"
@@ -1577,10 +1587,6 @@ export function WorkspaceGoogleSheetSection() {
                   New linked sheet
                 </button>
               </div>
-              <p className="mt-3 max-w-2xl text-sm leading-relaxed text-neutral-600">
-                Save multiple spreadsheet links (like flashcard collections) and open the one you need. Range and tab
-                choices stay with each link.
-              </p>
             </div>
             <div className="px-5 py-6 sm:px-7">
               {sheetLinks.length === 0 ? (
@@ -2151,35 +2157,40 @@ export function WorkspaceGoogleSheetSection() {
         />
         <div className="border-b border-pink-100/90 bg-gradient-to-br from-rose-50/95 via-white to-pink-50/60 px-5 py-4 sm:px-6">
           <p className="text-xs font-semibold uppercase tracking-wider text-pink-600/90">Calculator</p>
-          <h3 className="mt-0.5 bg-gradient-to-r from-pink-700 via-rose-600 to-pink-600 bg-clip-text text-lg font-bold tracking-tight text-transparent">
-            Grade calculator
-          </h3>
-          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-neutral-600">
+          <HeadingWithInfo
+            className="mt-0.5"
+            infoLabel="Grade calculator"
+            heading={
+              <h3 className="bg-gradient-to-r from-pink-700 via-rose-600 to-pink-600 bg-clip-text text-lg font-bold tracking-tight text-transparent">
+                Grade calculator
+              </h3>
+            }
+          >
             {gradeCalcMode === "mistakes" ? (
-              <>
+              <p>
                 Percent score ={" "}
-                <code className="rounded bg-pink-50/90 px-1.5 py-0.5 font-mono text-[11px] text-pink-900 shadow-sm ring-1 ring-pink-100/80">
+                <code className="rounded bg-pink-50/90 px-1.5 py-0.5 font-mono text-[11px] text-pink-900">
                   (x − y) / x × 100
                 </code>
-                , rounded to the nearest hundredth (two decimals).{" "}
-                <span className="font-medium text-neutral-800">x</span> = total items,{" "}
+                , rounded to two decimals. <span className="font-medium text-neutral-800">x</span> = total items,{" "}
                 <span className="font-medium text-neutral-800">y</span> = mistakes.
-              </>
+              </p>
             ) : (
-              <>
+              <p>
                 Percent score ={" "}
-                <code className="rounded bg-pink-50/90 px-1.5 py-0.5 font-mono text-[11px] text-pink-900 shadow-sm ring-1 ring-pink-100/80">
+                <code className="rounded bg-pink-50/90 px-1.5 py-0.5 font-mono text-[11px] text-pink-900">
                   c / x × 100
                 </code>
-                , rounded to the nearest hundredth (two decimals).{" "}
-                <span className="font-medium text-neutral-800">x</span> = total items,{" "}
+                , rounded to two decimals. <span className="font-medium text-neutral-800">x</span> = total items,{" "}
                 <span className="font-medium text-neutral-800">c</span> = total correct.
-              </>
-            )}{" "}
-            Select a cell in the <strong className="font-semibold text-pink-800">Spreadsheet</strong> section above
-            (click or focus), then press <strong className="font-semibold text-pink-800">Save</strong> to insert the
-            value.
-          </p>
+              </p>
+            )}
+            <p className="mt-2">
+              Select a cell in the <strong className="font-medium text-neutral-800">Spreadsheet</strong> section above
+              (click or focus), then press <strong className="font-medium text-neutral-800">Save</strong> to insert the
+              value.
+            </p>
+          </HeadingWithInfo>
         </div>
         <div className="p-4 sm:p-6">
           <fieldset className="mb-4 min-w-0">

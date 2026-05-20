@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { appendCardsToSet } from "@/lib/flashcards-repo";
 import type { FlashcardDraft } from "@/lib/types";
 
@@ -100,16 +101,26 @@ export function AddCardForm({ setId, onAdded, defaultExpanded = false }: Props) 
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-pink-50/40 sm:px-5"
       >
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold tracking-tight text-neutral-900 sm:text-base">
-            Add a card
-          </h3>
-          <p className="mt-0.5 text-xs text-neutral-500">
-            {open
-              ? "Slide 1: romaji · kana · group · Slide 2: gloss, context, examples"
-              : "Expand to type a new card — English and/or kana required"}
-          </p>
-        </div>
+        <span
+          className="flex min-w-0 items-center"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <HeadingWithInfo
+            align="center"
+            placement="above-start"
+            infoLabel="Add a card"
+            heading={
+              <h3 className="text-sm font-semibold tracking-tight text-neutral-900 sm:text-base">Add a card</h3>
+            }
+          >
+            {open ? (
+              <p>Slide 1: romaji · kana · group · Slide 2: gloss, context, examples. English and/or kana required.</p>
+            ) : (
+              <p>Expand to type a new card — English and/or kana required.</p>
+            )}
+          </HeadingWithInfo>
+        </span>
         <span
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-pink-50 text-pink-600 transition-transform duration-200 ${
             open ? "rotate-180" : ""

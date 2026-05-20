@@ -8,6 +8,7 @@ import {
   snapSegmentsToNonOverlappingSlices,
   type AudioSegmentRange,
 } from "@/lib/audio-silence-segment";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { insertLineBreaksForListeningPartDisplay } from "@/lib/jlpt-listening-number-split";
 import { splitTimedWordsByTranscriptLines } from "@/lib/manual-transcript-split";
 import {
@@ -1832,10 +1833,14 @@ export function WorkspaceAudioLessonSection() {
               </div>
             )}
             <div className="text-center">
-              <h2 className="text-lg font-semibold text-neutral-900">Add audio</h2>
-              <p className="mx-auto mt-2 max-w-md text-sm text-neutral-600">
+              <HeadingWithInfo
+                align="center"
+                className="justify-center"
+                infoLabel="Add audio lesson"
+                heading={<h2 className="text-lg font-semibold text-neutral-900">Add audio</h2>}
+              >
                 Upload a file, open the Lesson tab, then generate phrases and study with playback below.
-              </p>
+              </HeadingWithInfo>
               <label className="mt-6 inline-block cursor-pointer rounded-xl bg-gradient-to-b from-pink-500 to-rose-500 px-6 py-3 text-sm font-semibold text-white shadow-md shadow-pink-200/40 transition hover:from-pink-600 hover:to-rose-600">
                 {decoding ? "Decoding…" : "Choose audio file"}
                 <input

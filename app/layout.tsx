@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { DeploymentRefreshNotice } from "@/components/DeploymentRefreshNotice";
+import { FloatingTranslateWidget } from "@/components/FloatingTranslateWidget";
 import { GeminiChatWidget } from "@/components/GeminiChatWidget";
 import { PinGate } from "@/components/PinGate";
 import { SeasonalBackground } from "@/components/SeasonalBackground";
@@ -46,6 +47,7 @@ export default function RootLayout({
             <>
               {children}
               <GeminiChatWidget />
+              <FloatingTranslateWidget />
               <DeploymentRefreshNotice />
             </>
           </PinGate>

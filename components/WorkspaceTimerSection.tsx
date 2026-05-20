@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { HeadingWithInfo, InfoTip } from "@/components/InfoTip";
 import {
   ALARM_SOUND_OPTIONS,
   computeAlarmFadeOutSeconds,
@@ -429,10 +430,15 @@ export function WorkspaceTimerSection() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-pink-600">Focus</p>
-            <h2 className="mt-1.5 text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl">Countdown timer</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-600">
+            <HeadingWithInfo
+              className="mt-1.5 min-w-0 flex-1"
+              infoLabel="Countdown timer"
+              heading={
+                <h2 className="text-2xl font-bold tracking-tight text-neutral-900 sm:text-3xl">Countdown timer</h2>
+              }
+            >
               Pick a preset or set your own time, then go fullscreen when you only want the clock on screen.
-            </p>
+            </HeadingWithInfo>
           </div>
           <button
             type="button"
@@ -723,17 +729,24 @@ export function WorkspaceTimerSection() {
         >
           <div className="flex max-h-[min(640px,90dvh)] w-full max-w-md flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
             <div className="border-b border-pink-100 px-4 py-4 sm:px-5">
-              <h2 id="timer-alarm-sound-title" className="text-lg font-semibold text-neutral-900">
-                When time&apos;s up
-              </h2>
-              <p className="mt-1 text-sm text-neutral-500">
-                Choose a tone and how long it plays. The alarm eases out at the end so it doesn&apos;t stop abruptly.
-                Previews run about{" "}
-                <span className="font-semibold text-neutral-700 tabular-nums">
-                  {Math.round(TIMER_ALARM_PREVIEW_DURATION_SECONDS * 10) / 10}s
-                </span>{" "}
-                (with the same fade).
-              </p>
+              <HeadingWithInfo
+                align="center"
+                infoLabel="Alarm sound settings"
+                heading={
+                  <h2 id="timer-alarm-sound-title" className="text-lg font-semibold text-neutral-900">
+                    When time&apos;s up
+                  </h2>
+                }
+              >
+                <p>
+                  Choose a tone and how long it plays. The alarm eases out at the end so it doesn&apos;t stop abruptly.
+                  Previews run about{" "}
+                  <span className="font-medium text-neutral-800 tabular-nums">
+                    {Math.round(TIMER_ALARM_PREVIEW_DURATION_SECONDS * 10) / 10}s
+                  </span>{" "}
+                  (with the same fade).
+                </p>
+              </HeadingWithInfo>
               <div className="mt-4 rounded-xl border border-pink-100 bg-pink-50/50 px-3 py-3 sm:px-4">
                 <label htmlFor="timer-alarm-duration" className="block text-xs font-bold uppercase tracking-wider text-neutral-600">
                   Alarm length

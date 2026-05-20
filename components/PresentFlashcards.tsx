@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelSpeechSynthesis } from "@/lib/japanese-tts";
 import type { FlashcardRow } from "@/lib/types";
 import { FlashcardSlide, type FlashcardSlideHandle } from "@/components/FlashcardSlide";
+import { InfoTip } from "@/components/InfoTip";
 import {
   hasDetailPhase,
   type PresentationPhase,
@@ -129,14 +130,19 @@ export function PresentFlashcards({
             {phase === "word" && hasDetailPhase(card) ? "Next slide" : "Next card"}
           </button>
         </div>
-        <span className="col-span-full row-start-2 min-w-0 text-center text-sm text-neutral-500 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:px-2">
-          <span className="block">
+        <span className="relative col-span-full row-start-2 min-w-0 px-2 pr-9 text-center text-sm text-neutral-500 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:px-2 sm:pr-10">
+          <InfoTip
+            label="Presentation shortcuts"
+            placement="below-end"
+            className="absolute right-0 top-0 sm:right-0"
+          >
+            <p>Ctrl or Shift — listen</p>
+            <p className="mt-1">Space / → next · ← back · Esc close</p>
+          </InfoTip>
+          <span className="block tabular-nums">
             Card {index + 1} / {cards.length}
           </span>
-          <span className="block text-xs text-pink-600">{phaseLabel}</span>
-          <span className="mt-1 block text-[11px] text-neutral-400">
-            Ctrl or Shift — listen · Space / → next · ← back · Esc close
-          </span>
+          <span className="mt-0.5 block text-xs text-pink-600">{phaseLabel}</span>
         </span>
       </header>
 

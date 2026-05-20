@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { createCardSet } from "@/lib/flashcards-repo";
 
 type Props = {
@@ -59,12 +60,17 @@ export function NewCollectionButton({ onCreated }: Props) {
           aria-labelledby="new-collection-title"
         >
           <div className="w-full min-w-0 max-w-md rounded-2xl bg-white p-5 shadow-xl ring-1 ring-pink-100 sm:p-6">
-            <h2 id="new-collection-title" className="text-lg font-semibold text-neutral-900">
-              New collection
-            </h2>
-            <p className="mt-1 text-sm text-neutral-500">
+            <HeadingWithInfo
+              align="center"
+              infoLabel="New collection"
+              heading={
+                <h2 id="new-collection-title" className="text-lg font-semibold text-neutral-900">
+                  New collection
+                </h2>
+              }
+            >
               Create an empty set, then add cards from the set page.
-            </p>
+            </HeadingWithInfo>
             <label className="mt-4 block text-sm font-medium text-neutral-700" htmlFor="new-collection-name">
               Name
             </label>

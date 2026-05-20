@@ -27,6 +27,7 @@ import {
   usingLocalStorage,
 } from "@/lib/flashcards-repo";
 import type { CardSetRow, FlashcardRow } from "@/lib/types";
+import { onWorkspaceNavigate } from "@/lib/workspace-nav";
 
 function tileLabel(card: FlashcardRow): string {
   return (
@@ -98,6 +99,20 @@ export default function HomePage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    return onWorkspaceNavigate((area) => {
+      setWorkspaceArea(area);
+      if (area === "translate") {
+        requestAnimationFrame(() => {
+          document.getElementById("workspace-area-translate")?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        });
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (
@@ -337,7 +352,9 @@ export default function HomePage() {
         ) : workspaceArea === "timer" ? (
           <WorkspaceTimerSection />
         ) : workspaceArea === "translate" ? (
-          <WorkspaceTranslationSection />
+          <div id="workspace-area-translate">
+            <WorkspaceTranslationSection />
+          </div>
         ) : workspaceArea === "grammar" ? (
           <WorkspaceJapaneseGrammarSection />
         ) : workspaceArea === "youtube" ? (

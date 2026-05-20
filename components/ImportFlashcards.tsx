@@ -7,6 +7,7 @@ import {
   parseLessonLinesPaste,
 } from "@/lib/parse-pasted-lesson-lines";
 import type { FlashcardDraft } from "@/lib/types";
+import { HeadingWithInfo, InfoTip } from "@/components/InfoTip";
 import { addCardsToSet, createCardSet } from "@/lib/flashcards-repo";
 
 type Props = {
@@ -32,47 +33,6 @@ function rowHasEnglishOrKana(r: FlashcardDraft): boolean {
   const kj = (r.kanji ?? "").trim();
   const rom = (r.phonetic_reading ?? "").trim();
   return def.length > 0 || ka.length > 0 || kj.length > 0 || rom.length > 0;
-}
-
-function ImportHelpIcon() {
-  return (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        className="peer inline-flex h-8 w-8 items-center justify-center rounded-full text-neutral-400 transition hover:bg-pink-50 hover:text-pink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300"
-        aria-label="How import works"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          className="h-5 w-5"
-          aria-hidden
-        >
-          <path
-            fillRule="evenodd"
-            d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12Zm8.25-3.75a.75.75 0 0 0-1.5 0v.375a.75.75 0 0 0 1.5 0Zm-.75 11.25h.008v.008H9.75v-.008Z"
-            clipRule="evenodd"
-          />
-        </svg>
-      </button>
-      <div
-        role="tooltip"
-        className="pointer-events-none invisible absolute right-0 top-full z-50 mt-1.5 w-[min(19rem,calc(100vw-2.5rem))] rounded-lg border border-pink-100 bg-white p-3 text-left text-xs leading-relaxed text-neutral-600 shadow-lg peer-hover:visible peer-focus:visible"
-      >
-        <p>
-          Name your set, then <strong className="font-medium text-neutral-800">paste numbered lesson lines</strong>{" "}
-          (English + reading + kanji), <strong className="font-medium text-neutral-800">choose a file</strong>, or{" "}
-          <strong className="font-medium text-neutral-800">import from a photo</strong> (AI reads the image; another
-          photo appends rows).
-        </p>
-        <p className="mt-2">
-          Pasted lines fill English and Kana; the <strong className="font-medium text-neutral-800">kanji column is
-          skipped</strong>. PDF import fills English and Kana when the layout matches a table.
-        </p>
-      </div>
-    </div>
-  );
 }
 
 export function ImportFlashcards({ onImported }: Props) {
@@ -332,12 +292,26 @@ export function ImportFlashcards({ onImported }: Props) {
         >
           <div className="flex max-h-[90dvh] w-full min-w-0 max-w-5xl flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
             <div className="border-b border-pink-100 px-5 py-3 sm:py-4">
-              <div className="flex items-center justify-between gap-3">
-                <h2 id="import-title" className="text-lg font-semibold text-neutral-900">
-                  Import a set
-                </h2>
-                <ImportHelpIcon />
-              </div>
+              <HeadingWithInfo
+                align="center"
+                infoLabel="How import works"
+                heading={
+                  <h2 id="import-title" className="text-lg font-semibold text-neutral-900">
+                    Import a set
+                  </h2>
+                }
+              >
+                <p>
+                  Name your set, then <strong className="font-medium text-neutral-800">paste numbered lesson lines</strong>{" "}
+                  (English + reading + kanji), <strong className="font-medium text-neutral-800">choose a file</strong>, or{" "}
+                  <strong className="font-medium text-neutral-800">import from a photo</strong> (AI reads the image; another
+                  photo appends rows).
+                </p>
+                <p className="mt-2">
+                  Pasted lines fill English and Kana; the <strong className="font-medium text-neutral-800">kanji column is
+                  skipped</strong>. PDF import fills English and Kana when the layout matches a table.
+                </p>
+              </HeadingWithInfo>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
                 <label className="sr-only" htmlFor="set-name">
                   Set name
@@ -414,18 +388,18 @@ export function ImportFlashcards({ onImported }: Props) {
                   spellCheck={false}
                   className="w-full resize-y rounded-lg border border-pink-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-neutral-800 outline-none ring-pink-300 focus:ring-2"
                 />
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => applyLessonPasteText(lessonPaste)}
-                    className="rounded-lg bg-pink-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-pink-600"
-                  >
-                    Parse into table
-                  </button>
-                  <span className="text-[0.7rem] leading-snug text-neutral-500 sm:text-xs">
-                    Numbered paste auto-fills the table; kanji column is skipped.
-                  </span>
-                </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => applyLessonPasteText(lessonPaste)}
+                      className="rounded-lg bg-pink-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-pink-600"
+                    >
+                      Parse into table
+                    </button>
+                    <InfoTip label="Paste lesson lines help" className="-mt-0.5">
+                      Numbered paste auto-fills the table; the kanji column is skipped.
+                    </InfoTip>
+                  </div>
                 </div>
               </details>
             </div>

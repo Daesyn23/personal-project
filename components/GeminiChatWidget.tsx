@@ -13,6 +13,14 @@ import {
   type AiMessageRow,
 } from "@/lib/workspace-ai-chat-repo";
 import { packUserChatContent, unpackChatMessageContent } from "@/lib/chat-vision-pack";
+import {
+  FAB_BOTTOM_PRIMARY,
+  FLOATING_PANEL_ABOVE_ONE_FAB,
+  onCloseFloatingPanels,
+  onFloatingPanelOpen,
+  publishFloatingPanelOpen,
+  requestCloseFloatingPanels,
+} from "@/lib/workspace-floating-panels";
 
 const STORAGE_KEY = "workspace-gemini-chat-v1";
 const PANEL_SIZE_KEY = "workspace-gemini-chat-panel-size-v1";
@@ -256,6 +264,7 @@ function prettifyProvider(p: string | undefined): string | null {
 export function GeminiChatWidget() {
   const synced = isWorkspaceAiChatSynced();
   const [open, setOpen] = useState(false);
+  const [translateOpen, setTranslateOpen] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<AiConversationRow[]>([]);
@@ -438,6 +447,22 @@ export function GeminiChatWidget() {
     if (!listRef.current) return;
     listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages, open, loading]);
+
+  useEffect(() => {
+    return onCloseFloatingPanels((except) => {
+      if (except !== "chat") setOpen(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    publishFloatingPanelOpen("chat", open);
+  }, [open]);
+
+  useEffect(() => {
+    return onFloatingPanelOpen((id, isOpen) => {
+      if (id === "translate") setTranslateOpen(isOpen);
+    });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -711,28 +736,39 @@ export function GeminiChatWidget() {
     handle.addEventListener("pointercancel", cleanup);
   }, []);
 
+  const fabShell =
+    "flex h-12 w-12 items-center justify-center rounded-full border border-neutral-200/90 bg-white/90 text-pink-600 shadow-sm shadow-neutral-900/[0.04] backdrop-blur-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300/70 focus-visible:ring-offset-2 hover:border-pink-200/70 hover:bg-pink-50/30 hover:text-pink-700";
+
+  const toggleChatOpen = useCallback(() => {
+    setOpen((v) => {
+      const next = !v;
+      if (next) requestCloseFloatingPanels("chat");
+      return next;
+    });
+  }, []);
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`fixed z-[100] flex h-12 w-12 items-center justify-center rounded-full border bg-white/90 text-pink-600 shadow-sm shadow-neutral-900/[0.04] backdrop-blur-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300/70 focus-visible:ring-offset-2 max-sm:bottom-[max(1rem,env(safe-area-inset-bottom,0px))] max-sm:right-[max(1rem,env(safe-area-inset-right,0px))] sm:bottom-5 sm:right-5 ${
-          open
-            ? "border-pink-200/90 text-neutral-600 hover:border-neutral-300 hover:bg-neutral-50/95"
-            : "border-neutral-200/90 hover:border-pink-200/70 hover:bg-pink-50/30 hover:text-pink-700"
-        }`}
-        aria-expanded={open}
-        aria-controls="gemini-chat-panel"
-        aria-label={open ? "Close AI chat" : "Open AI chat"}
-      >
-        {open ? <CloseFabIcon className="h-5 w-5" /> : <ChatFabIcon className="h-5 w-5" />}
-      </button>
+      {!translateOpen ? (
+        <button
+          type="button"
+          onClick={toggleChatOpen}
+          className={`fixed z-[100] ${FAB_BOTTOM_PRIMARY} ${fabShell} ${
+            open ? "border-pink-200/90 text-neutral-600 hover:border-neutral-300 hover:bg-neutral-50/95" : ""
+          }`}
+          aria-expanded={open}
+          aria-controls="gemini-chat-panel"
+          aria-label={open ? "Close AI chat" : "Open AI chat"}
+        >
+          {open ? <CloseFabIcon className="h-5 w-5" /> : <ChatFabIcon className="h-5 w-5" />}
+        </button>
+      ) : null}
 
       {open && (
         <div
           ref={panelRef}
           id="gemini-chat-panel"
-          className="fixed bottom-[max(4.5rem,calc(env(safe-area-inset-bottom,0px)+4.5rem))] right-[max(1rem,env(safe-area-inset-right,0px))] z-[100] flex flex-col overflow-hidden rounded-2xl border border-pink-200/70 bg-white shadow-[0_20px_50px_-12px_rgba(236,72,153,0.28),0_8px_24px_-6px_rgba(0,0,0,0.08)] ring-1 ring-pink-100/40 sm:bottom-[4.5rem] sm:right-5"
+          className={`${FLOATING_PANEL_ABOVE_ONE_FAB} flex flex-col overflow-hidden rounded-2xl border border-pink-200/70 bg-white shadow-[0_20px_50px_-12px_rgba(236,72,153,0.28),0_8px_24px_-6px_rgba(0,0,0,0.08)] ring-1 ring-pink-100/40`}
           style={{
             width: panelSize.w,
             height: panelSize.h,

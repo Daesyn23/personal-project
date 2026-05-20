@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import type { FlashcardRow } from "@/lib/types";
 
 function tileLabel(card: FlashcardRow): string {
@@ -77,13 +78,20 @@ export function ReorderCardsModal({ cards, setTitle, onClose, onSaveOrder }: Pro
     >
       <div className="flex max-h-[90dvh] w-full min-w-0 max-w-lg flex-col rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
         <div className="border-b border-pink-100 px-5 py-4">
-          <h2 id="reorder-title" className="text-lg font-semibold text-neutral-900">
-            Reorder cards
-          </h2>
-          <p className="mt-1 text-sm text-neutral-500">
-            Set: <span className="font-medium text-neutral-700">{setTitle}</span> — drag a row by the handle, or use the
-            arrows. First in the list is first in the slideshow.
-          </p>
+          <HeadingWithInfo
+            align="center"
+            infoLabel="How to reorder cards"
+            heading={
+              <h2 id="reorder-title" className="text-lg font-semibold text-neutral-900">
+                Reorder cards
+              </h2>
+            }
+          >
+            <p>
+              Set: <span className="font-medium text-neutral-800">{setTitle}</span> — drag a row by the handle, or use the
+              arrows. First in the list is first in the slideshow.
+            </p>
+          </HeadingWithInfo>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-3 py-3">

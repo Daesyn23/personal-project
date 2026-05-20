@@ -13,6 +13,7 @@ import {
   uploadWorkspaceFile,
 } from "@/lib/documents-repo";
 import { usingLocalStorage } from "@/lib/flashcards-repo";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { WorkspaceLessonFolderCard } from "@/components/WorkspaceLessonFolderCard";
 import { WorkspaceLevelCollectionCard } from "@/components/WorkspaceLevelCollectionCard";
 import type { WorkspaceFileRow, WorkspaceFolderRow } from "@/lib/types";
@@ -359,7 +360,13 @@ export function WorkspaceDocumentsSection() {
         <div className={fileDragActive ? "pointer-events-none select-none" : undefined}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-neutral-900">Documents</h2>
+            <HeadingWithInfo
+              align="center"
+              infoLabel="Documents"
+              heading={<h2 className="text-lg font-semibold text-neutral-900">Documents</h2>}
+            >
+              Organize PDFs and materials in JLPT-style levels and lessons. Drag files onto the panel to upload.
+            </HeadingWithInfo>
             {localOnly && (
               <p className="mt-2 text-xs text-amber-700">
                 Without Supabase, files stay in this browser only (IndexedDB + local storage).
@@ -494,8 +501,16 @@ export function WorkspaceDocumentsSection() {
               <div>
                 {depth === 0 ? (
                   <>
-                    <h3 className="mb-1 text-xl font-bold tracking-tight text-neutral-900 sm:text-2xl">Collections</h3>
-                    <p className="mb-4 text-sm text-neutral-500">Choose a level to open lessons and files.</p>
+                    <HeadingWithInfo
+                      align="center"
+                      className="mb-4"
+                      infoLabel="Collections"
+                      heading={
+                        <h3 className="text-xl font-bold tracking-tight text-neutral-900 sm:text-2xl">Collections</h3>
+                      }
+                    >
+                      Choose a level to open lessons and files.
+                    </HeadingWithInfo>
                     <ul className="grid gap-4 sm:grid-cols-2">
                       {folders.map((f) => (
                         <WorkspaceLevelCollectionCard
@@ -510,8 +525,14 @@ export function WorkspaceDocumentsSection() {
                   </>
                 ) : depth === 1 ? (
                   <>
-                    <h3 className="mb-1 text-lg font-bold tracking-tight text-neutral-900">Lessons</h3>
-                    <p className="mb-4 text-sm text-neutral-500">Open a lesson to add PDFs and materials.</p>
+                    <HeadingWithInfo
+                      align="center"
+                      className="mb-4"
+                      infoLabel="Lessons"
+                      heading={<h3 className="text-lg font-bold tracking-tight text-neutral-900">Lessons</h3>}
+                    >
+                      Open a lesson to add PDFs and materials.
+                    </HeadingWithInfo>
                     <ul className="grid gap-4 sm:grid-cols-2">
                       {folders.map((f) => (
                         <WorkspaceLessonFolderCard

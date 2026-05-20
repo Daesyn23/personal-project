@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { cancelSpeechSynthesis, speakJapaneseLine } from "@/lib/japanese-tts";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { useSpeechActivationHandlers } from "@/lib/useSpeechActivationHandlers";
 
 const MAX_INPUT = 2500;
@@ -250,11 +251,18 @@ export function WorkspaceJapaneseGrammarSection() {
             <span className="inline-flex rounded border border-pink-200 bg-pink-50/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-pink-800">
               Proofreader
             </span>
-            <h2 className="mt-3 text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">Japanese grammar check</h2>
-            <p className={`mt-3 max-w-2xl text-[15px] leading-relaxed text-stone-600 ${proseEnglish}`}>
-              Paste a sentence or phrase. You get a verdict, a plain-English rationale, margin-style notes when needed,
-              and a corrected line to copy.
-            </p>
+            <HeadingWithInfo
+              className="mt-3"
+              infoLabel="Grammar check"
+              heading={
+                <h2 className="text-2xl font-bold tracking-tight text-stone-900 sm:text-3xl">Japanese grammar check</h2>
+              }
+            >
+              <p className={proseEnglish}>
+                Paste a sentence or phrase. You get a verdict, a plain-English rationale, margin-style notes when
+                needed, and a corrected line to copy.
+              </p>
+            </HeadingWithInfo>
           </div>
         </div>
         {geminiReady === false && (

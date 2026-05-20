@@ -7,6 +7,7 @@ import {
   speakEnglishLine,
   speakJapaneseLine,
 } from "@/lib/japanese-tts";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { useSpeechActivationHandlers } from "@/lib/useSpeechActivationHandlers";
 
 const STORAGE_HISTORY = "workspace-en-ja-translation-history-v1";
@@ -510,23 +511,28 @@ export function WorkspaceTranslationSection() {
         />
         <div className="relative">
           <p className="text-xs font-semibold uppercase tracking-wider text-pink-600/90">Translation</p>
-          <h2 className="mt-1 max-w-2xl bg-gradient-to-r from-rose-700 via-pink-600 to-fuchsia-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-3xl">
-            {direction === "en-ja" ? "English → Japanese" : "Japanese → English"}
-          </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-neutral-600">
+          <HeadingWithInfo
+            className="mt-1"
+            infoLabel="Translation workspace"
+            heading={
+              <h2 className="max-w-2xl bg-gradient-to-r from-rose-700 via-pink-600 to-fuchsia-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-3xl">
+                {direction === "en-ja" ? "English → Japanese" : "Japanese → English"}
+              </h2>
+            }
+          >
             {direction === "en-ja" ? (
-              <>
+              <p>
                 Natural Japanese with tone control, optional hiragana reading, copy buttons, and{" "}
-                <strong className="font-semibold text-neutral-800">listen</strong> with your browser’s Japanese voice —
+                <strong className="font-medium text-neutral-800">listen</strong> with your browser’s Japanese voice —
                 for study and classroom prep.
-              </>
+              </p>
             ) : (
-              <>
+              <p>
                 Clear English that matches the Japanese register, optional nuance notes, copy, and{" "}
-                <strong className="font-semibold text-neutral-800">listen</strong> with your browser’s English voice.
-              </>
+                <strong className="font-medium text-neutral-800">listen</strong> with your browser’s English voice.
+              </p>
             )}
-          </p>
+          </HeadingWithInfo>
           <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Translation direction">
             <button
               type="button"

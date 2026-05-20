@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { HeadingWithInfo } from "@/components/InfoTip";
 import { updateCardSetName } from "@/lib/flashcards-repo";
 import type { CardSetRow } from "@/lib/types";
 
@@ -52,10 +53,17 @@ export function RenameCollectionModal({ collection, onClose, onSaved }: Props) {
     >
       <div className="w-full min-w-0 max-w-md rounded-2xl bg-white shadow-xl ring-1 ring-pink-100">
         <div className="border-b border-pink-100 px-5 py-4">
-          <h2 id="rename-collection-title" className="text-lg font-semibold text-neutral-900">
-            Rename collection
-          </h2>
-          <p className="mt-1 text-sm text-neutral-500">This name appears in your list and breadcrumb.</p>
+          <HeadingWithInfo
+            align="center"
+            infoLabel="Rename collection"
+            heading={
+              <h2 id="rename-collection-title" className="text-lg font-semibold text-neutral-900">
+                Rename collection
+              </h2>
+            }
+          >
+            This name appears in your list and breadcrumb.
+          </HeadingWithInfo>
         </div>
         <div className="p-5">
           <label className="block text-xs font-medium text-neutral-600">
