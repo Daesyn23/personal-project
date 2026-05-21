@@ -8,6 +8,7 @@ export type WorkspaceNavigateArea =
   | "timer"
   | "translate"
   | "grammar"
+  | "japanesePractice"
   | "youtube"
   | "lessonPlan";
 

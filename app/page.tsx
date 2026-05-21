@@ -14,6 +14,7 @@ import { WorkspaceDocumentsSection } from "@/components/WorkspaceDocumentsSectio
 import { WorkspaceGoogleSheetSection } from "@/components/WorkspaceGoogleSheetSection";
 import { WorkspaceTimerSection } from "@/components/WorkspaceTimerSection";
 import { WorkspaceJapaneseGrammarSection } from "@/components/WorkspaceJapaneseGrammarSection";
+import { WorkspaceJapanesePracticeSection } from "@/components/WorkspaceJapanesePracticeSection";
 import { WorkspaceLessonPlanSection } from "@/components/WorkspaceLessonPlanSection";
 import { WorkspaceTranslationSection } from "@/components/WorkspaceTranslationSection";
 import { WorkspaceYoutubeSection } from "@/components/WorkspaceYoutubeSection";
@@ -48,6 +49,7 @@ type WorkspaceArea =
   | "timer"
   | "translate"
   | "grammar"
+  | "japanesePractice"
   | "youtube"
   | "lessonPlan";
 
@@ -59,6 +61,7 @@ const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
   { id: "timer", label: "Timer" },
   { id: "translate", label: "Translate" },
   { id: "grammar", label: "Grammar" },
+  { id: "japanesePractice", label: "Practice" },
   { id: "youtube", label: "Video Lessons" },
   { id: "lessonPlan", label: "Lesson plan" },
 ];
@@ -121,6 +124,7 @@ export default function HomePage() {
       workspaceArea === "timer" ||
       workspaceArea === "translate" ||
       workspaceArea === "grammar" ||
+      workspaceArea === "japanesePractice" ||
       workspaceArea === "youtube" ||
       workspaceArea === "lessonPlan" ||
       workspaceArea === "audioLesson"
@@ -357,6 +361,8 @@ export default function HomePage() {
           </div>
         ) : workspaceArea === "grammar" ? (
           <WorkspaceJapaneseGrammarSection />
+        ) : workspaceArea === "japanesePractice" ? (
+          <WorkspaceJapanesePracticeSection />
         ) : workspaceArea === "youtube" ? (
           <WorkspaceYoutubeSection />
         ) : workspaceArea === "lessonPlan" ? (
