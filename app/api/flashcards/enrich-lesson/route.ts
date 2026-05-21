@@ -15,6 +15,12 @@ export const maxDuration = 120;
 const CHUNK_SIZE = 12;
 const MAX_CARDS = 120;
 
+const EXAMPLE_JLPT_VOCAB_RULES = `**example_sentence vocabulary (JLPT):**
+- Use **only** words that appear on standard **JLPT N5 or N4** word lists, plus unavoidable particles and classroom-safe grammar endings (です／ます, て-form, etc.).
+- Do **not** use N3+ vocabulary, slang, or rare kanji compounds beyond N5/N4 study level.
+- The headword must appear naturally in the sentence.
+- Kanji is OK when typical for N5/N4 items; loanwords stay in **katakana**.`;
+
 const TEACHER_RESEARCH_TAGLISH_RULES = `**teacher_research (MANDATORY LANGUAGE — read carefully):**
 - Write **Taglish only**: natural **code-mix of Filipino/Tagalog + English** (Philippine classroom / teacher lounge style).
 - **FORBIDDEN**: paragraphs that are **English-only**. If the text could pass as a UK/US textbook footnote with zero Tagalog, it is **wrong**.
@@ -36,6 +42,8 @@ const TEACHER_RESEARCH_TAGLISH_RULES = `**teacher_research (MANDATORY LANGUAGE �
 const SYSTEM_INSTRUCTION_REGENERATE = `You help Japanese teachers in the Philippines prepare vocabulary cards.
 You MUST reply with a single JSON object only. No markdown fences, no commentary outside JSON.
 
+${EXAMPLE_JLPT_VOCAB_RULES}
+
 ${TEACHER_RESEARCH_TAGLISH_RULES}
 
 Schema:
@@ -51,7 +59,7 @@ Schema:
 }
 
 Rules for EACH input item (matched by "id"):
-- "example_sentence": **fresh** natural Japanese sentence using the vocabulary (です／ます or plain as fits); classroom-appropriate; avoid repeating the same scenario pattern across items in one batch when possible. **Hiragana only** — no kanji.
+- "example_sentence": **fresh** natural Japanese sentence using the vocabulary (です／ます or plain as fits); classroom-appropriate; avoid repeating the same scenario pattern across items in one batch when possible. Follow **example_sentence vocabulary (JLPT)** above.
 - "example_translation": English gloss of the example only.
 - "teacher_research": follow the **teacher_research (MANDATORY LANGUAGE)** block exactly — Taglish, 5–10 sentences, cultural + historical facts when relevant.
 - Output one object per input id, same order as the input list, same ids — no extras, no omissions.
@@ -59,6 +67,8 @@ Rules for EACH input item (matched by "id"):
 
 const SYSTEM_INSTRUCTION = `You help Japanese teachers in the Philippines prepare vocabulary cards.
 You MUST reply with a single JSON object only. No markdown fences, no commentary outside JSON.
+
+${EXAMPLE_JLPT_VOCAB_RULES}
 
 ${TEACHER_RESEARCH_TAGLISH_RULES}
 
@@ -88,7 +98,7 @@ Rules for EACH input item (matched by "id"):
   - **II** = Group II (ichidan / 一段).
   - **III** = Group III: する, くる, and ～する compounds (e.g. しょうかいします).
   - If the headword is **not** a classified verb (e.g. bare noun with no group), set category_label to **null**.
-- "example_sentence": natural Japanese sentence using the vocabulary (です／ます or plain as fits the item); keep it classroom-appropriate. **Hiragana only** — no kanji.
+- "example_sentence": natural Japanese sentence using the vocabulary (です／ます or plain as fits the item); keep it classroom-appropriate. Follow **example_sentence vocabulary (JLPT)** above.
 - "example_translation": English gloss of the example only.
 - "teacher_research": follow the **teacher_research (MANDATORY LANGUAGE)** block at the top of this prompt exactly — Taglish with Tagalog in every sentence; never English-only prose.
 - Output one object per input id, same order as the input list, same ids — no extras, no omissions.
@@ -363,6 +373,7 @@ export async function POST(req: Request) {
             "Each output object must use the same id string as the matching input line (copy the UUID exactly).",
             "Write a new example scenario when possible — do not copy generic textbook filler.",
             "",
+            "REMINDER — example_sentence: JLPT N5/N4 vocabulary only (plus particles). Katakana loanwords stay katakana.",
             "REMINDER — teacher_research: TAGLISH ONLY; 5–10 sentences; include cultural and historical facts where relevant.",
             "",
             JSON.stringify(
@@ -375,6 +386,7 @@ export async function POST(req: Request) {
             "Generate fields for each vocabulary item below. Return JSON only.",
             "Each output object must use the same id string as the matching input line (copy the UUID exactly).",
             "",
+            "REMINDER — example_sentence: JLPT N5/N4 vocabulary only (plus particles). Katakana loanwords stay katakana.",
             "REMINDER — teacher_research: TAGLISH ONLY (Filipino/Tagalog mixed with English). Each sentence must contain Tagalog words. English-only teacher_research is invalid. Include cultural and historical facts; 5–10 sentences.",
             "",
             JSON.stringify(

@@ -1,4 +1,3 @@
-import { toHiragana } from "wanakana";
 import { hasKanji } from "@/lib/japanese-tokens";
 
 export type FlashcardJapaneseField = "kana" | "example_sentence";
@@ -11,10 +10,6 @@ const DEFAULT_FIELDS: FlashcardJapaneseField[] = ["kana", "example_sentence"];
 
 function fieldKey(lineIndex: number, field: FlashcardJapaneseField): string {
   return `${lineIndex}:${field}`;
-}
-
-export function localJapaneseToHiragana(text: string): string {
-  return toHiragana(text.trim());
 }
 
 export function rowHasJapaneseForHiragana(row: RowJapaneseFields): boolean {
@@ -38,27 +33,24 @@ export function rowsNeedKanjiReadingForHiragana(rows: RowJapaneseFields[]): bool
 type KanjiSlot = { lineIndex: number; field: FlashcardJapaneseField; text: string };
 
 /**
- * Convert kana and example fields to hiragana (wanakana locally; batch-reading API for kanji).
+ * Convert kanji in kana and example fields to hiragana readings (batch-reading API).
+ * Hiragana and katakana are left unchanged.
  */
 export async function convertJapaneseFieldsToHiragana<T extends RowJapaneseFields>(
   rows: T[],
   fields: FlashcardJapaneseField[] = DEFAULT_FIELDS
 ): Promise<T[]> {
-  const localByKey = new Map<string, string>();
   const kanjiSlots: KanjiSlot[] = [];
 
   rows.forEach((row, lineIndex) => {
     for (const field of fields) {
       const raw = row[field].trim();
-      if (!raw) continue;
-      const key = fieldKey(lineIndex, field);
-      if (hasKanji(raw)) {
-        kanjiSlots.push({ lineIndex, field, text: raw });
-      } else {
-        localByKey.set(key, localJapaneseToHiragana(raw));
-      }
+      if (!raw || !hasKanji(raw)) continue;
+      kanjiSlots.push({ lineIndex, field, text: raw });
     }
   });
+
+  if (kanjiSlots.length === 0) return rows;
 
   const aiByKey = new Map<string, string>();
 
@@ -88,9 +80,7 @@ export async function convertJapaneseFieldsToHiragana<T extends RowJapaneseField
     for (const field of fields) {
       const key = fieldKey(lineIndex, field);
       const fromAi = aiByKey.get(key);
-      const fromLocal = localByKey.get(key);
       if (fromAi) next[field] = fromAi;
-      else if (fromLocal) next[field] = fromLocal;
     }
     return next;
   });

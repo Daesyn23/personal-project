@@ -18,7 +18,8 @@ Schema:
 
 Rules:
 - "readings" MUST have the same length and order as the numbered input lines.
-- Each element is a hiragana-only reading for that line (include okurigana).
+- Replace kanji with hiragana readings (include okurigana). Hiragana segments stay as written.
+- **Keep katakana as katakana** (loanwords, foreign names, etc.) — do not convert katakana to hiragana.
 - Preserve punctuation and spacing roughly as in the source line.
 - Do not include kanji or romaji in the readings.
 - If a line is empty or whitespace-only, use "" for that slot.`;

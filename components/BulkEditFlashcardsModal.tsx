@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createFlashcard,
   deleteFlashcard,
@@ -12,12 +12,15 @@ import {
 import { HeadingWithInfo } from "@/components/InfoTip";
 import {
   convertJapaneseFieldsToHiragana,
-  rowsHaveJapaneseForHiragana,
   rowsNeedKanjiReadingForHiragana,
 } from "@/lib/flashcard-hiragana";
 import type { FlashcardDraft, FlashcardRow } from "@/lib/types";
 
 const DRAFT_PREFIX = "draft:";
+
+/** Smaller batches reduce timeout risk on slow AI responses. */
+const AUTOFILL_CHUNK_SIZE = 6;
+const AUTOFILL_REQUEST_TIMEOUT_MS = 110_000;
 
 function isDraftId(id: string): boolean {
   return id.startsWith(DRAFT_PREFIX);
@@ -161,6 +164,35 @@ function mergeEnrichment(row: RowDraft, ai: EnrichResultRow): RowDraft {
   };
 }
 
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function fetchEnrichChunk(
+  cards: { id: string; kana: string; definition: string }[],
+  signal: AbortSignal
+): Promise<EnrichResultRow[]> {
+  const res = await fetch("/api/flashcards/enrich-lesson", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cards }),
+    signal,
+  });
+  const data = (await res.json()) as { results?: EnrichResultRow[]; error?: string };
+  if (!res.ok) {
+    throw new Error(data.error || "Autofill failed.");
+  }
+  const list = data.results;
+  if (!Array.isArray(list)) {
+    throw new Error("Invalid response from server.");
+  }
+  return list;
+}
+
 function mergeRegeneratedContent(row: RowDraft, ai: EnrichResultRow): RowDraft {
   const preferIncoming = (incoming: string | null | undefined, existing: string) => {
     const t = (incoming ?? "").trim();
@@ -253,6 +285,12 @@ const gripHandle =
 export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCardsRemoved }: Props) {
   const [rows, setRows] = useState<RowDraft[]>(() => rowsFromCards(cards));
   const [busy, setBusy] = useState(false);
+  const [autofillBusy, setAutofillBusy] = useState(false);
+  const [autofillProgress, setAutofillProgress] = useState<{ done: number; total: number } | null>(
+    null
+  );
+  const [autofillTryAnyway, setAutofillTryAnyway] = useState(false);
+  const autofillAbortRef = useRef<AbortController | null>(null);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [convertingHiragana, setConvertingHiragana] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -276,38 +314,59 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      autofillAbortRef.current?.abort();
+    };
+  }, []);
+
+  const autofillTargets = useMemo(
+    () => rows.filter((r) => !isDraftId(r.id) && rowWantsEnrichment(r)),
+    [rows]
+  );
+
+  const hasAutofillTargets = autofillTargets.length > 0;
+
   const canAutofill = useMemo(
-    () => rows.some((r) => !isDraftId(r.id) && rowWantsEnrichment(r)) && geminiReady === true,
-    [rows, geminiReady]
+    () =>
+      hasAutofillTargets &&
+      !autofillBusy &&
+      (geminiReady === true || (geminiReady === false && autofillTryAnyway)),
+    [hasAutofillTargets, autofillBusy, geminiReady, autofillTryAnyway]
+  );
+
+  const canTryAutofillAnyway = useMemo(
+    () => hasAutofillTargets && geminiReady === false && !autofillBusy,
+    [hasAutofillTargets, geminiReady, autofillBusy]
   );
 
   const autofillDisabledReason = useMemo(() => {
-    if (geminiReady === false)
-      return "Add GEMINI_API_KEY, GROQ_API_KEY, and/or OPENAI_API_KEY to .env.local to use AI autofill.";
+    if (autofillBusy) return "";
+    if (geminiReady === false && !autofillTryAnyway)
+      return "Add GEMINI_API_KEY, GROQ_API_KEY, and/or OPENAI_API_KEY to .env.local, or use Try anyway.";
     if (geminiReady === null) return "Checking AI configuration…";
-    if (rows.length === 0) return "";
-    if (!rows.some((r) => !isDraftId(r.id) && rowWantsEnrichment(r))) {
+    if (!hasAutofillTargets) {
       return "All target fields are already filled (romaji, group, example, translation, teacher research), or new rows need a saved card id for autofill.";
     }
     return "";
-  }, [rows, geminiReady]);
+  }, [hasAutofillTargets, geminiReady, autofillTryAnyway, autofillBusy]);
 
   const needsAiForHiragana = useMemo(() => rowsNeedKanjiReadingForHiragana(rows), [rows]);
 
   const canConvertToHiragana = useMemo(() => {
-    if (!rowsHaveJapaneseForHiragana(rows)) return false;
-    if (needsAiForHiragana && geminiReady !== true) return false;
+    if (!needsAiForHiragana) return false;
+    if (geminiReady !== true) return false;
     return true;
-  }, [rows, needsAiForHiragana, geminiReady]);
+  }, [needsAiForHiragana, geminiReady]);
 
   const hiraganaDisabledReason = useMemo(() => {
-    if (!rowsHaveJapaneseForHiragana(rows)) return "No kana or example text in any row.";
-    if (needsAiForHiragana && geminiReady === false) {
+    if (!needsAiForHiragana) return "No kanji in kana or example columns.";
+    if (geminiReady === false) {
       return "Kanji in kana or example needs AI keys (GEMINI, GROQ, or OPENAI) in .env.local.";
     }
-    if (needsAiForHiragana && geminiReady === null) return "Checking AI configuration…";
+    if (geminiReady === null) return "Checking AI configuration…";
     return "";
-  }, [rows, needsAiForHiragana, geminiReady]);
+  }, [needsAiForHiragana, geminiReady]);
 
   const runRegenerateRow = useCallback(
     async (index: number) => {
@@ -344,8 +403,7 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
           throw new Error("No regenerated content returned.");
         }
         const merged = rows.map((r, ri) => (ri === index ? mergeRegeneratedContent(r, ai) : r));
-        const converted = await convertJapaneseFieldsToHiragana(merged);
-        setRows(converted);
+        setRows(merged);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Regeneration failed.");
       } finally {
@@ -356,8 +414,8 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
   );
 
   const runJapaneseToHiragana = useCallback(async () => {
-    if (!rowsHaveJapaneseForHiragana(rows)) return;
-    if (rowsNeedKanjiReadingForHiragana(rows) && geminiReady !== true) return;
+    if (!rowsNeedKanjiReadingForHiragana(rows)) return;
+    if (geminiReady !== true) return;
 
     setConvertingHiragana(true);
     setError(null);
@@ -397,45 +455,85 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
     });
   };
 
-  const runAutofill = useCallback(async () => {
-    const toSend = rows.filter((r) => !isDraftId(r.id) && rowWantsEnrichment(r));
-    if (toSend.length === 0 || geminiReady !== true) return;
+  const stopAutofill = useCallback(() => {
+    autofillAbortRef.current?.abort();
+  }, []);
 
-    setBusy(true);
+  const runAutofill = useCallback(async (options?: { tryAnyway?: boolean }) => {
+    if (!hasAutofillTargets) return;
+    const tryAnyway = options?.tryAnyway === true || autofillTryAnyway;
+    if (geminiReady !== true && !(geminiReady === false && tryAnyway)) return;
+    if (options?.tryAnyway) setAutofillTryAnyway(true);
+
+    const toSend = autofillTargets;
+    const abort = new AbortController();
+    autofillAbortRef.current = abort;
+    let chunkTimeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    setAutofillBusy(true);
+    setAutofillProgress({ done: 0, total: toSend.length });
     setError(null);
+
+    const chunks = chunkArray(
+      toSend.map((r) => ({
+        id: r.id,
+        kana: r.kana.trim(),
+        definition: r.definition.trim(),
+      })),
+      AUTOFILL_CHUNK_SIZE
+    );
+
+    let filledCount = 0;
+    let currentRows = rows;
+
     try {
-      const res = await fetch("/api/flashcards/enrich-lesson", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cards: toSend.map((r) => ({
-            id: r.id,
-            kana: r.kana.trim(),
-            definition: r.definition.trim(),
-          })),
-        }),
-      });
-      const data = (await res.json()) as { results?: EnrichResultRow[]; error?: string };
-      if (!res.ok) {
-        throw new Error(data.error || "Autofill failed.");
+      for (const chunk of chunks) {
+        if (abort.signal.aborted) break;
+
+        chunkTimeoutId = setTimeout(() => abort.abort(), AUTOFILL_REQUEST_TIMEOUT_MS);
+        let list: EnrichResultRow[];
+        try {
+          list = await fetchEnrichChunk(chunk, abort.signal);
+        } finally {
+          clearTimeout(chunkTimeoutId);
+          chunkTimeoutId = undefined;
+        }
+        const byId = new Map(list.map((r) => [r.id, r] as const));
+        currentRows = currentRows.map((row) => {
+          const ai = byId.get(row.id);
+          if (!ai) return row;
+          return mergeEnrichment(row, ai);
+        });
+        setRows(currentRows);
+        filledCount += chunk.length;
+        setAutofillProgress({ done: filledCount, total: toSend.length });
       }
-      const list = data.results;
-      if (!Array.isArray(list)) {
-        throw new Error("Invalid response from server.");
+
+      if (abort.signal.aborted) {
+        const stoppedMsg =
+          filledCount > 0
+            ? `Autofill stopped. Filled ${filledCount} of ${toSend.length} cards — you can edit, save, or run autofill again.`
+            : "Autofill stopped — you can edit manually and save.";
+        setError(stoppedMsg);
       }
-      const byId = new Map(list.map((r) => [r.id, r] as const));
-      const merged = rows.map((row) => {
-        const ai = byId.get(row.id);
-        if (!ai) return row;
-        return mergeEnrichment(row, ai);
-      });
-      setRows(await convertJapaneseFieldsToHiragana(merged));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Autofill failed.");
+      if (!abort.signal.aborted) {
+        const msg = e instanceof Error ? e.message : "Autofill failed.";
+        if (filledCount > 0) {
+          setError(
+            `${msg} Partial fill: ${filledCount} of ${toSend.length} cards updated — you can save and continue, or retry.`
+          );
+        } else {
+          setError(`${msg} You can fill fields manually and save, or retry autofill.`);
+        }
+      }
     } finally {
-      setBusy(false);
+      if (chunkTimeoutId !== undefined) clearTimeout(chunkTimeoutId);
+      autofillAbortRef.current = null;
+      setAutofillBusy(false);
+      setAutofillProgress(null);
     }
-  }, [rows, geminiReady]);
+  }, [rows, geminiReady, autofillTryAnyway, hasAutofillTargets, autofillTargets]);
 
   const removeRowByIcon = async (index: number) => {
     const id = rows[index]?.id;
@@ -483,8 +581,8 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
     setError(null);
     try {
       let rowsToSave = nonempty;
-      if (rowsHaveJapaneseForHiragana(nonempty)) {
-        if (rowsNeedKanjiReadingForHiragana(nonempty) && geminiReady !== true) {
+      if (rowsNeedKanjiReadingForHiragana(nonempty)) {
+        if (geminiReady !== true) {
           setError(
             geminiReady === false
               ? "Example or kana still has kanji. Add AI keys in .env.local or use Kana & example → hiragana first."
@@ -542,11 +640,18 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
 
   const n = rows.length;
   const nonemptyCount = rows.filter((r) => !rowIsEmpty(r)).length;
-  const toolbarLocked = busy || regeneratingId !== null || convertingHiragana;
+  const toolbarLocked = busy || autofillBusy || regeneratingId !== null || convertingHiragana;
 
   const toolbarHint = useMemo(() => {
     if (convertingHiragana) return { text: "Converting kana & examples to hiragana…", tone: "info" as const };
-    if (busy) return { text: "Autofill or save in progress…", tone: "info" as const };
+    if (autofillBusy && autofillProgress) {
+      return {
+        text: `Autofill ${autofillProgress.done}/${autofillProgress.total} — Stop to continue editing or save partial results.`,
+        tone: "info" as const,
+      };
+    }
+    if (autofillBusy) return { text: "Autofill in progress — use Stop to continue without waiting.", tone: "info" as const };
+    if (busy) return { text: "Saving…", tone: "info" as const };
     if (regeneratingId) return { text: "Regenerating example & research…", tone: "info" as const };
     if (geminiReady === false && !toolbarLocked) {
       return { text: "Add GEMINI, GROQ, or OPENAI API key in .env.local for AI.", tone: "warn" as const };
@@ -560,6 +665,8 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
     return null;
   }, [
     autofillDisabledReason,
+    autofillBusy,
+    autofillProgress,
     busy,
     canAutofill,
     convertingHiragana,
@@ -600,11 +707,17 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
                 </li>
                 <li>Gloss and/or kana required. Clear a row to delete on save, or use trash.</li>
                 <li>
-                  <strong className="font-medium text-neutral-800">Example</strong> — hiragana (auto on save).
+                  <strong className="font-medium text-neutral-800">Example</strong> — JLPT N5/N4 words; kanji →
+                  hiragana on save (katakana unchanged).
                 </li>
                 <li>
                   <strong className="font-medium text-neutral-800">Teacher research</strong> — prep only; use ↻ to
                   regenerate.
+                </li>
+                <li>
+                  <strong className="font-medium text-neutral-800">Autofill</strong> — runs in small batches; use{" "}
+                  <strong className="font-medium text-neutral-800">Stop autofill</strong> if it hangs, then save partial
+                  results or fill by hand.
                 </li>
               </ul>
             </HeadingWithInfo>
@@ -624,24 +737,53 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
               >
                 Add row
               </button>
-              <button
-                type="button"
-                className={btnToolbar}
-                disabled={toolbarLocked || !canAutofill}
-                title={
-                  !canAutofill
-                    ? autofillDisabledReason
-                    : "Fill empty romaji, group, example, translation, and teacher research"
-                }
-                onClick={() => void runAutofill()}
-              >
-                Autofill empty (AI)
-              </button>
+              {autofillBusy ? (
+                <button
+                  type="button"
+                  className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-amber-300/90 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-950 shadow-sm transition hover:border-amber-400 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/50"
+                  onClick={stopAutofill}
+                  title="Stop autofill and keep any fields already filled"
+                >
+                  Stop autofill
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={btnToolbar}
+                  disabled={toolbarLocked || !canAutofill}
+                  title={
+                    !canAutofill
+                      ? autofillDisabledReason
+                      : "Fill empty romaji, group, example, translation, and teacher research (batched)"
+                  }
+                  onClick={() => void runAutofill()}
+                >
+                  Autofill empty (AI)
+                </button>
+              )}
+              {canTryAutofillAnyway && !autofillTryAnyway ? (
+                <button
+                  type="button"
+                  className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300"
+                  disabled={toolbarLocked}
+                  title="Attempt autofill even when AI keys were not detected (may fail)"
+                  onClick={() => {
+                    setError(null);
+                    void runAutofill({ tryAnyway: true });
+                  }}
+                >
+                  Try anyway
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={btnToolbar}
                 disabled={toolbarLocked || !canConvertToHiragana}
-                title={!canConvertToHiragana ? hiraganaDisabledReason : "Convert kana and example columns to hiragana"}
+                title={
+                  !canConvertToHiragana
+                    ? hiraganaDisabledReason
+                    : "Convert kanji in kana and example to hiragana (katakana unchanged)"
+                }
                 onClick={() => void runJapaneseToHiragana()}
               >
                 <span className="sm:hidden">→ Hiragana</span>
@@ -908,10 +1050,17 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
         </div>
 
         {error ? (
-          <div className="shrink-0 border-t border-rose-100 bg-rose-50/60 px-4 py-2.5 sm:px-5">
-            <p className="text-sm font-medium text-rose-800" role="alert">
+          <div className="flex shrink-0 items-start justify-between gap-3 border-t border-rose-100 bg-rose-50/60 px-4 py-2.5 sm:px-5">
+            <p className="min-w-0 flex-1 text-sm font-medium text-rose-800" role="alert">
               {error}
             </p>
+            <button
+              type="button"
+              className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium text-rose-800 hover:bg-rose-100"
+              onClick={() => setError(null)}
+            >
+              Dismiss
+            </button>
           </div>
         ) : null}
 
@@ -926,6 +1075,7 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
           <button
             type="button"
             disabled={busy || regeneratingId !== null || convertingHiragana || !hasPendingChanges}
+            title={autofillBusy ? "You can save while autofill runs, or stop autofill first" : undefined}
             onClick={() => void save()}
             className="rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50"
           >
