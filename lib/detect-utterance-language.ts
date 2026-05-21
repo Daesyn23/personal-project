@@ -3,6 +3,9 @@ import type { SpeechInputLang } from "@/lib/browser-speech-input";
 /** Detected spoken/written language for practice turns. */
 export type DetectedLanguage = "japanese" | "english" | "tagalog" | "mixed" | "unknown";
 
+/** Berry's reply language mode for practice chat. */
+export type PracticeReplyMode = "japanese" | "taglish";
+
 const TAGALOG_MARKERS =
   /\b(ang|ng|sa|ako|ikaw|ka|po|ba|ano|paano|kung|para|naman|lang|din|rin|ito|iyan|yung|siya|natin|tayo|mga|hindi|oo|kasi|talaga|pwede|gusto|sabihin|ibig|tandaan|halimbawa)\b/gi;
 
@@ -38,6 +41,39 @@ export function detectUtteranceLanguage(text: string): DetectedLanguage {
   if (jp >= 1) return "japanese";
   if (latin >= 1) return "english";
   return "unknown";
+}
+
+/**
+ * Which language Berry should use this turn (Japanese monologue vs Taglish).
+ */
+export function resolvePracticeReplyLanguage(
+  lastUserText: string,
+  priorUserTexts: string[] = []
+): PracticeReplyMode {
+  const current = detectUtteranceLanguage(lastUserText);
+
+  if (current === "japanese") return "japanese";
+  if (current === "english" || current === "tagalog") return "taglish";
+  if (current === "mixed") {
+    const jp = countJapaneseChars(lastUserText);
+    const latin = countLatinLetters(lastUserText);
+    if (jp >= 1 && jp >= latin) return "japanese";
+    return "taglish";
+  }
+
+  let jpScore = 0;
+  let taglishScore = 0;
+  for (const t of [lastUserText, ...priorUserTexts]) {
+    const d = detectUtteranceLanguage(t);
+    if (d === "japanese") jpScore += 2;
+    else if (d === "english" || d === "tagalog") taglishScore += 2;
+    else if (d === "mixed") {
+      if (countJapaneseChars(t) >= countLatinLetters(t)) jpScore += 1;
+      else taglishScore += 1;
+    }
+  }
+  if (jpScore > taglishScore) return "japanese";
+  return "taglish";
 }
 
 export function detectedLanguageLabel(lang: DetectedLanguage): string {

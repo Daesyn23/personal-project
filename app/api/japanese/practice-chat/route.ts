@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import {
   detectUtteranceLanguage,
-  detectedLanguageLabel,
+  resolvePracticeReplyLanguage,
   type DetectedLanguage,
 } from "@/lib/detect-utterance-language";
 import {
   buildJapanesePracticeSystemInstruction,
+  buildPracticeTurnLanguageHint,
   type JlptPracticeLevel,
 } from "@/lib/japanese-practice-prompt";
 import {
@@ -94,10 +95,14 @@ export async function POST(req: Request) {
   const detected: DetectedLanguage = lastUser
     ? detectUtteranceLanguage(lastUser.content)
     : "unknown";
-  const langHint =
-    detected !== "unknown"
-      ? `**This turn (auto-detected):** Learner is using **${detectedLanguageLabel(detected)}**. Match that language naturally.`
-      : "";
+  const priorUserTexts = turns
+    .filter((m) => m.role === "user")
+    .slice(0, -1)
+    .map((m) => m.content);
+  const replyMode = lastUser
+    ? resolvePracticeReplyLanguage(lastUser.content, priorUserTexts)
+    : "taglish";
+  const langHint = buildPracticeTurnLanguageHint(replyMode);
   const mergedSystem = [systemInstruction, langHint, ...clientSystem].filter(Boolean).join("\n\n");
 
   const openAiMessages: OpenAiChatMessage[] = [
@@ -111,7 +116,8 @@ export async function POST(req: Request) {
   try {
     const { text, model } = await openaiChatCompletionText({
       messages: openAiMessages,
-      temperature: 0.65,
+      temperature: 0.82,
+      maxTokens: 200,
     });
     return NextResponse.json({
       text,

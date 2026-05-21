@@ -24,6 +24,7 @@ export async function openaiChatCompletionText(options: {
   jsonMode?: boolean;
   model?: string;
   temperature?: number;
+  maxTokens?: number;
 }): Promise<{ text: string; model: string }> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
@@ -36,7 +37,7 @@ export async function openaiChatCompletionText(options: {
     model,
     messages: options.messages,
     temperature: options.temperature ?? 0.2,
-    max_tokens: 8192,
+    max_tokens: options.maxTokens ?? 8192,
   };
   if (options.jsonMode) {
     body.response_format = { type: "json_object" };

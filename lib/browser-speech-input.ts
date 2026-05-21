@@ -4,8 +4,8 @@
 
 export type SpeechInputLang = "ja-JP" | "en-US" | "fil-PH";
 
-const DEFAULT_SILENCE_MS = 1400;
-const MIN_UTTERANCE_CHARS = 2;
+const DEFAULT_SILENCE_MS = 1000;
+const MIN_UTTERANCE_CHARS = 1;
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
 
@@ -14,7 +14,7 @@ type SpeechRecognitionInstance = {
   continuous: boolean;
   interimResults: boolean;
   maxAlternatives: number;
-  start: () => void;
+  start: (audioTrack?: MediaStreamTrack) => void;
   stop: () => void;
   abort: () => void;
   onresult: ((ev: SpeechRecognitionEventLike) => void) | null;
@@ -54,12 +54,19 @@ export type UtteranceRecognitionSession = {
 
 export type StartUtteranceRecognitionOptions = {
   lang: SpeechInputLang;
-  /** Ms of silence after last heard speech before auto-submit (default 1400). */
+  /** Noise-cancelled mic track from `acquirePracticeMic` (Chrome/Edge). */
+  audioTrack?: MediaStreamTrack;
+  /** Ms of silence after last heard speech before auto-submit (default 1000). */
   silenceMs?: number;
   onInterim?: (text: string) => void;
+  /** Fired when the engine hears any speech (for UI). */
+  onSpeechActivity?: () => void;
   /** Fired once when silence is detected or the engine ends with transcript. */
   onUtteranceComplete: (text: string) => void;
+  /** Fired when listening ended but nothing usable was captured. */
+  onEmpty?: () => void;
   onListening?: () => void;
+  /** Fired after utterance handling; use for restarting mic. */
   onEnd?: () => void;
   onError?: (code: string) => void;
 };
@@ -97,6 +104,8 @@ export function startUtteranceRecognition(
     latestInterim = "";
     if (text.length >= MIN_UTTERANCE_CHARS) {
       options.onUtteranceComplete(text);
+    } else {
+      options.onEmpty?.();
     }
   };
 
@@ -127,6 +136,7 @@ export function startUtteranceRecognition(
       if (!row) continue;
       const t = row[0]?.transcript?.trim() ?? "";
       if (!t) continue;
+      options.onSpeechActivity?.();
       if (row.isFinal) {
         finalParts.push(t);
         latestInterim = "";
@@ -157,12 +167,25 @@ export function startUtteranceRecognition(
 
   rec.onend = () => {
     clearSilenceTimer();
-    options.onEnd?.();
     if (!stoppedByUser) flushComplete();
+    options.onEnd?.();
+  };
+
+  const startRecognition = () => {
+    const track = options.audioTrack;
+    if (track?.kind === "audio" && track.readyState === "live") {
+      try {
+        rec.start(track);
+        return;
+      } catch {
+        /* fall through to default mic */
+      }
+    }
+    rec.start();
   };
 
   try {
-    rec.start();
+    startRecognition();
   } catch {
     options.onError?.("start-failed");
     return null;
