@@ -51,7 +51,7 @@ async function getUserMediaWithConstraints(
  * Tries ideal processing constraints first, then falls back to basic flags.
  */
 export async function acquirePracticeMic(): Promise<PracticeMicSession | null> {
-  let stream =
+  const stream =
     (await getUserMediaWithConstraints(true)) ??
     (await getUserMediaWithConstraints(false));
   if (!stream) return null;
