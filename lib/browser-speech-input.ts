@@ -2,10 +2,15 @@
  * Browser Web Speech API (SpeechRecognition) for hands-free practice chat.
  */
 
+import { classifyPhraseEnd } from "@/lib/utterance-phrase-end";
+
 export type SpeechInputLang = "ja-JP" | "en-US" | "fil-PH";
 
 const DEFAULT_SILENCE_MS = 700;
 const DEFAULT_SILENCE_AFTER_FINAL_MS = 380;
+const DEFAULT_SILENCE_INCOMPLETE_MS = 1150;
+const DEFAULT_SILENCE_INCOMPLETE_AFTER_FINAL_MS = 1350;
+const DEFAULT_MAX_INCOMPLETE_WAIT_MS = 3400;
 const MIN_UTTERANCE_CHARS = 1;
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
@@ -59,9 +64,16 @@ export type StartUtteranceRecognitionOptions = {
   audioTrack?: MediaStreamTrack;
   /** Ms of silence while interim results are updating (default 700). */
   silenceMs?: number;
-  /** Shorter silence after a final transcript chunk (default 380). */
+  /** Shorter silence after a final transcript chunk when the phrase looks complete (default 380). */
   silenceMsAfterFinal?: number;
+  /** Longer silence when the phrase looks mid-sentence (default 1150). */
+  silenceMsIncomplete?: number;
+  silenceMsIncompleteAfterFinal?: number;
+  /** Force-submit after this much wait while the phrase still looks incomplete (default 3400). */
+  maxIncompleteWaitMs?: number;
   onInterim?: (text: string) => void;
+  /** Fired when we detect a mid-sentence pause and are waiting for more speech. */
+  onPhraseIncomplete?: () => void;
   /** Fired when the engine hears any speech (for UI). */
   onSpeechActivity?: () => void;
   /** Fired once when silence is detected or the engine ends with transcript. */
@@ -86,11 +98,16 @@ export function startUtteranceRecognition(
   const rec = new Ctor();
   const silenceMs = options.silenceMs ?? DEFAULT_SILENCE_MS;
   const silenceMsAfterFinal = options.silenceMsAfterFinal ?? DEFAULT_SILENCE_AFTER_FINAL_MS;
+  const silenceMsIncomplete = options.silenceMsIncomplete ?? DEFAULT_SILENCE_INCOMPLETE_MS;
+  const silenceMsIncompleteAfterFinal =
+    options.silenceMsIncompleteAfterFinal ?? DEFAULT_SILENCE_INCOMPLETE_AFTER_FINAL_MS;
+  const maxIncompleteWaitMs = options.maxIncompleteWaitMs ?? DEFAULT_MAX_INCOMPLETE_WAIT_MS;
   let silenceTimer: ReturnType<typeof setTimeout> | null = null;
   let finalParts: string[] = [];
   let latestInterim = "";
   let completed = false;
   let stoppedByUser = false;
+  let incompleteWaitAccum = 0;
 
   const clearSilenceTimer = () => {
     if (silenceTimer) {
@@ -113,9 +130,28 @@ export function startUtteranceRecognition(
     }
   };
 
+  const currentTranscript = () => [...finalParts, latestInterim].filter(Boolean).join(" ").trim();
+
   const scheduleSilenceEnd = (afterFinal = false) => {
     clearSilenceTimer();
-    const delay = afterFinal && !latestInterim ? silenceMsAfterFinal : silenceMs;
+    const text = currentTranscript();
+    const endKind = classifyPhraseEnd(text);
+    const phraseComplete = endKind === "complete" || endKind === "empty";
+
+    let delay: number;
+    if (phraseComplete) {
+      incompleteWaitAccum = 0;
+      delay = afterFinal && !latestInterim ? silenceMsAfterFinal : silenceMs;
+    } else {
+      options.onPhraseIncomplete?.();
+      delay = afterFinal && !latestInterim ? silenceMsIncompleteAfterFinal : silenceMsIncomplete;
+      incompleteWaitAccum += delay;
+      if (incompleteWaitAccum >= maxIncompleteWaitMs) {
+        incompleteWaitAccum = 0;
+        delay = Math.min(silenceMsAfterFinal, 280);
+      }
+    }
+
     silenceTimer = setTimeout(() => {
       try {
         rec.stop();
@@ -142,6 +178,7 @@ export function startUtteranceRecognition(
       const t = row[0]?.transcript?.trim() ?? "";
       if (!t) continue;
       options.onSpeechActivity?.();
+      incompleteWaitAccum = 0;
       if (row.isFinal) {
         finalParts.push(t);
         latestInterim = "";

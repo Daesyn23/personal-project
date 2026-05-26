@@ -143,13 +143,15 @@ function phaseHeadline(
   voiceSession: boolean,
   interim: string,
   detected: DetectedLanguage,
-  speechActive: boolean
+  speechActive: boolean,
+  phraseIncomplete: boolean
 ): string {
   if (!voiceSession) return "Tap the circle to start";
   if (phase === "thinking") return `${TUTOR_NAME} is replying…`;
   if (phase === "speaking") return `Listen to ${TUTOR_NAME}`;
   if (interim) return "Got it…";
   if (phase === "listening") {
+    if (phraseIncomplete && !speechActive) return "Finish your thought — still listening";
     if (speechActive) return "Keep going — brief pause when done";
     const lang =
       detected !== "unknown" ? ` · ${detectedLanguageLabel(detected)}` : "";
@@ -182,6 +184,7 @@ export function WorkspaceJapanesePracticeSection() {
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [speechPulse, setSpeechPulse] = useState(0);
   const [speechDetected, setSpeechDetected] = useState(false);
+  const [phraseIncomplete, setPhraseIncomplete] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const practiceMicRef = useRef<PracticeMicSession | null>(null);
@@ -192,6 +195,7 @@ export function WorkspaceJapanesePracticeSection() {
   const bumpSpeechActivity = useCallback(() => {
     setSpeechDetected(true);
     setSpeechPulse(1);
+    setPhraseIncomplete(false);
     setError(null);
   }, []);
   const recognitionRef = useRef<ReturnType<typeof startUtteranceRecognition> | null>(null);
@@ -302,6 +306,7 @@ export function WorkspaceJapanesePracticeSection() {
     recognitionRef.current = null;
     setInterim("");
     setSpeechDetected(false);
+    setPhraseIncomplete(false);
   }, []);
 
   const stopSpeak = useCallback(() => {
@@ -361,14 +366,18 @@ export function WorkspaceJapanesePracticeSection() {
     const lang: SpeechInputLang = inferred === "fil-PH" ? "en-US" : inferred;
     listenLangRef.current = lang;
     setSpeechDetected(false);
+    setPhraseIncomplete(false);
 
     const session = startUtteranceRecognition({
       lang,
       audioTrack: practiceMicRef.current?.track,
       silenceMs: 650,
       silenceMsAfterFinal: 360,
+      silenceMsIncomplete: 1150,
+      silenceMsIncompleteAfterFinal: 1350,
       onListening: () => setPhase("listening"),
       onSpeechActivity: bumpSpeechActivity,
+      onPhraseIncomplete: () => setPhraseIncomplete(true),
       onInterim: (text) => {
         bumpSpeechActivity();
         setInterim(text);
@@ -376,6 +385,7 @@ export function WorkspaceJapanesePracticeSection() {
         if (live !== "unknown") setDetectedLang(live);
       },
       onUtteranceComplete: (text) => {
+        setPhraseIncomplete(false);
         const detected = detectUtteranceLanguage(text);
         setDetectedLang(detected);
         listenLangRef.current = detectedLanguageToSpeechLang(detected, text);
@@ -636,7 +646,14 @@ export function WorkspaceJapanesePracticeSection() {
   }, [clearListenRestartTimer, stopVoiceMonitor, stopPracticeMic]);
 
   const speechActive = speechDetected || displayLevel > 0.03 || interim.length > 0;
-  const headline = phaseHeadline(phase, voiceSession, interim, detectedLang, speechActive);
+  const headline = phaseHeadline(
+    phase,
+    voiceSession,
+    interim,
+    detectedLang,
+    speechActive,
+    phraseIncomplete
+  );
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-3xl space-y-5">
@@ -797,10 +814,18 @@ export function WorkspaceJapanesePracticeSection() {
                 {voiceSession && phase === "listening" && (
                   <p
                     className={`mt-2 text-center text-[11px] font-medium ${
-                      speechActive ? "text-rose-600" : "text-stone-400"
+                      speechActive
+                        ? "text-rose-600"
+                        : phraseIncomplete
+                          ? "text-amber-700"
+                          : "text-stone-400"
                     }`}
                   >
-                    {speechActive ? "Voice detected" : "Waiting for you…"}
+                    {speechActive
+                      ? "Voice detected"
+                      : phraseIncomplete
+                        ? "Mid-sentence — keep talking"
+                        : "Waiting for you…"}
                   </p>
                 )}
               </div>
