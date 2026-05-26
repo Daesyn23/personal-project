@@ -1,5 +1,5 @@
 import type { DetectedLanguage } from "@/lib/detect-utterance-language";
-import type { JlptPracticeLevel } from "@/lib/japanese-practice-prompt";
+import type { JlptPracticeLevel, PracticeSpeechRegister } from "@/lib/japanese-practice-prompt";
 
 export type PracticeStreamResult = {
   text: string;
@@ -13,6 +13,7 @@ export type PracticeStreamResult = {
 export async function streamPracticeChat(
   options: {
     jlptLevel: JlptPracticeLevel;
+    speechRegister: PracticeSpeechRegister;
     messages: { role: "user" | "assistant"; content: string }[];
     signal?: AbortSignal;
   },
@@ -23,6 +24,7 @@ export async function streamPracticeChat(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       jlptLevel: options.jlptLevel,
+      speechRegister: options.speechRegister,
       messages: options.messages,
       stream: true,
     }),

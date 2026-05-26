@@ -15,7 +15,11 @@ import {
   type DetectedLanguage,
 } from "@/lib/detect-utterance-language";
 import { VoiceActivityVisualizer } from "@/components/VoiceActivityVisualizer";
-import { TUTOR_NAME, type JlptPracticeLevel } from "@/lib/japanese-practice-prompt";
+import {
+  TUTOR_NAME,
+  type JlptPracticeLevel,
+  type PracticeSpeechRegister,
+} from "@/lib/japanese-practice-prompt";
 import {
   pullSpeakableChunks,
   remainingSpeakableTail,
@@ -62,6 +66,7 @@ type ChatMessage = {
 type StoredState = {
   messages: ChatMessage[];
   jlptLevel: JlptPracticeLevel;
+  speechRegister: PracticeSpeechRegister;
   autoSpeak: boolean;
 };
 
@@ -73,6 +78,7 @@ function loadStored(): StoredState {
   const fallback: StoredState = {
     messages: [],
     jlptLevel: "N5",
+    speechRegister: "polite",
     autoSpeak: true,
   };
   if (typeof window === "undefined") return fallback;
@@ -98,6 +104,7 @@ function loadStored(): StoredState {
     return {
       messages: messages.slice(-30),
       jlptLevel: p.jlptLevel === "N4" ? "N4" : "N5",
+      speechRegister: p.speechRegister === "casual" ? "casual" : "polite",
       autoSpeak: p.autoSpeak !== false,
     };
   } catch {
@@ -156,6 +163,9 @@ export function WorkspaceJapanesePracticeSection() {
   const [openAiReady, setOpenAiReady] = useState<boolean | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(initial.messages);
   const [jlptLevel, setJlptLevel] = useState<JlptPracticeLevel>(initial.jlptLevel);
+  const [speechRegister, setSpeechRegister] = useState<PracticeSpeechRegister>(
+    initial.speechRegister
+  );
   const [autoSpeak, setAutoSpeak] = useState(initial.autoSpeak);
   const [detectedLang, setDetectedLang] = useState<DetectedLanguage>("unknown");
   const [voiceSession, setVoiceSession] = useState(false);
@@ -190,6 +200,7 @@ export function WorkspaceJapanesePracticeSection() {
   const loadingRef = useRef(loading);
   const messagesRef = useRef(messages);
   const jlptLevelRef = useRef(jlptLevel);
+  const speechRegisterRef = useRef(speechRegister);
   const autoSpeakRef = useRef(autoSpeak);
   const ttsSupportedRef = useRef(ttsSupported);
   const listenLangRef = useRef<SpeechInputLang>("ja-JP");
@@ -198,6 +209,7 @@ export function WorkspaceJapanesePracticeSection() {
   loadingRef.current = loading;
   messagesRef.current = messages;
   jlptLevelRef.current = jlptLevel;
+  speechRegisterRef.current = speechRegister;
   autoSpeakRef.current = autoSpeak;
   ttsSupportedRef.current = ttsSupported;
 
@@ -215,8 +227,8 @@ export function WorkspaceJapanesePracticeSection() {
   }, []);
 
   useEffect(() => {
-    saveStored({ messages, jlptLevel, autoSpeak });
-  }, [messages, jlptLevel, autoSpeak]);
+    saveStored({ messages, jlptLevel, speechRegister, autoSpeak });
+  }, [messages, jlptLevel, speechRegister, autoSpeak]);
 
   useEffect(() => {
     let cancelled = false;
@@ -501,6 +513,7 @@ export function WorkspaceJapanesePracticeSection() {
           const streamed = await streamPracticeChat(
             {
               jlptLevel: jlptLevelRef.current,
+              speechRegister: speechRegisterRef.current,
               messages: apiMessages,
             },
             (accumulated) => {
@@ -521,6 +534,7 @@ export function WorkspaceJapanesePracticeSection() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               jlptLevel: jlptLevelRef.current,
+              speechRegister: speechRegisterRef.current,
               messages: apiMessages,
             }),
           });
@@ -670,26 +684,56 @@ export function WorkspaceJapanesePracticeSection() {
 
       <section className="flex flex-col overflow-hidden rounded-2xl border border-stone-200/70 bg-white shadow-[0_8px_32px_rgba(15,23,42,0.07)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 px-4 py-3 sm:px-5">
-          <div
-            className="inline-flex rounded-full bg-stone-100/90 p-1 ring-1 ring-stone-200/80"
-            role="group"
-            aria-label="JLPT level"
-          >
-            {(["N5", "N4"] as const).map((lvl) => (
-              <button
-                key={lvl}
-                type="button"
-                onClick={() => setJlptLevel(lvl)}
-                disabled={loading || voiceSession}
-                className={`rounded-full px-4 py-1.5 text-xs font-bold transition ${
-                  jlptLevel === lvl
-                    ? "bg-white text-pink-700 shadow-sm ring-1 ring-pink-100"
-                    : "text-stone-600 hover:text-stone-900"
-                }`}
-              >
-                {lvl}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="inline-flex rounded-full bg-stone-100/90 p-1 ring-1 ring-stone-200/80"
+              role="group"
+              aria-label="JLPT level"
+            >
+              {(["N5", "N4"] as const).map((lvl) => (
+                <button
+                  key={lvl}
+                  type="button"
+                  onClick={() => setJlptLevel(lvl)}
+                  disabled={loading || voiceSession}
+                  className={`rounded-full px-4 py-1.5 text-xs font-bold transition ${
+                    jlptLevel === lvl
+                      ? "bg-white text-pink-700 shadow-sm ring-1 ring-pink-100"
+                      : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  {lvl}
+                </button>
+              ))}
+            </div>
+            <div
+              className="inline-flex rounded-full bg-stone-100/90 p-1 ring-1 ring-stone-200/80"
+              role="group"
+              aria-label="Japanese speech register"
+            >
+              {(
+                [
+                  { id: "polite" as const, label: "Polite", hint: "です／ます" },
+                  { id: "casual" as const, label: "Casual", hint: "plain" },
+                ] as const
+              ).map(({ id, label, hint }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setSpeechRegister(id)}
+                  disabled={loading || voiceSession}
+                  title={id === "polite" ? "Polite です／ます (default)" : "Casual plain form"}
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold transition sm:px-4 ${
+                    speechRegister === id
+                      ? "bg-white text-pink-700 shadow-sm ring-1 ring-pink-100"
+                      : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  {label}
+                  <span className="ml-1 hidden font-medium text-stone-500 sm:inline">({hint})</span>
+                </button>
+              ))}
+            </div>
           </div>
           {voiceSession && <PhasePill phase={phase} />}
         </div>

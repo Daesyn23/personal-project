@@ -7,6 +7,7 @@ import {
 import {
   buildJapanesePracticeSystemInstruction,
   buildPracticeTurnLanguageHint,
+  normalizePracticeSpeechRegister,
   type JlptPracticeLevel,
 } from "@/lib/japanese-practice-prompt";
 import {
@@ -77,12 +78,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const jlptLevel = normalizeJlptLevel(
-    body && typeof body === "object" ? (body as { jlptLevel?: unknown }).jlptLevel : undefined
-  );
-  const messages = normalizeMessages(
-    body && typeof body === "object" ? (body as { messages?: unknown }).messages : undefined
-  );
+  const bodyObj =
+    body && typeof body === "object"
+      ? (body as { jlptLevel?: unknown; speechRegister?: unknown; messages?: unknown })
+      : null;
+  const jlptLevel = normalizeJlptLevel(bodyObj?.jlptLevel);
+  const speechRegister = normalizePracticeSpeechRegister(bodyObj?.speechRegister);
+  const messages = normalizeMessages(bodyObj?.messages);
   if (!messages) {
     return NextResponse.json(
       { error: "messages must be a non-empty array ending with a user message (max 30 turns)." },
@@ -90,7 +92,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const systemInstruction = buildJapanesePracticeSystemInstruction(jlptLevel);
+  const systemInstruction = buildJapanesePracticeSystemInstruction(jlptLevel, speechRegister);
   const clientSystem = messages.filter((m) => m.role === "system").map((m) => m.content);
   const turns = messages.filter((m) => m.role !== "system");
   const lastUser = [...turns].reverse().find((m) => m.role === "user");
@@ -104,7 +106,7 @@ export async function POST(req: Request) {
   const replyMode = lastUser
     ? resolvePracticeReplyLanguage(lastUser.content, priorUserTexts)
     : "taglish";
-  const langHint = buildPracticeTurnLanguageHint(replyMode);
+  const langHint = buildPracticeTurnLanguageHint(replyMode, speechRegister);
   const mergedSystem = [systemInstruction, langHint, ...clientSystem].filter(Boolean).join("\n\n");
 
   const openAiMessages: OpenAiChatMessage[] = [
