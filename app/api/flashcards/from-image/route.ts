@@ -43,8 +43,9 @@ Printed vs handwritten (critical):
 
 Field rules:
 - "definition" = the **printed English** gloss in the vocabulary table (right column when present). Include parenthetical English that is clearly part of the printed gloss. Omit handwritten English.
-- "kana" = the **printed** hiragana/katakana entry (left column when present), including printed in-line markers such as verb group "I" / "II" / "III", printed bracket Japanese like [パンが～], and printed な in [な] for adjectives—keep those on the kana side so the front of the card matches the book. If the page has no separate kana column but the headword is clearly printed in kana/kanji mix, put hiragana/katakana portions here.
-- "kanji" = **printed** kanji headword when it appears as its own column or clearly separate from kana; otherwise null.
+- "kana" = copy the **printed** left-column (or kana-column) text **exactly** as shown—character for character. If the book shows hiragana, transcribe hiragana only (do not convert to katakana, kanji, or romaji). If it shows katakana, transcribe katakana only. Include printed markers (verb group I/II/III, [パンが～], [な], etc.) exactly as printed.
+- "kanji" = copy the **printed** kanji-column text **exactly** as shown—character for character. Do not rewrite, simplify, or add readings that are not printed in that column. If there is no kanji column or cell for that row, use null.
+- **Faithful transcription (critical):** Do not change, normalize, translate, or "fix" Japanese script. Never move text between columns, merge columns, or substitute a different script than what is printed on the page.
 - "phonetic_reading" = latin romaji **only** when the list itself is printed in romaji or there is **no** printed kana and romaji is clearly **typeset**. For textbook photos with printed kana, leave "phonetic_reading" null even if students wrote romaji by hand.
 - "native_script" = null unless there is a clear extra printed line worth preserving; do not stuff ignored handwriting here.
 - Preserve lesson order top-to-bottom, left-to-right as in the image.
@@ -54,7 +55,7 @@ Field rules:
 - At most ${MAX_CARDS} cards; if more, take the first contiguous vocabulary block and say so in "verification_note".`;
 
 const USER_TASK_VISION =
-  "Extract vocabulary rows into the JSON schema. Prefer printed kana (left column) + printed English (right column) on textbook pages; ignore handwritten romaji and notes.";
+  "Extract vocabulary rows into the JSON schema. Transcribe each printed column exactly as it appears—do not convert hiragana, katakana, or kanji. Prefer printed kana (left) + printed English (right) on textbook pages; ignore handwritten romaji and notes.";
 
 function optString(v: unknown): string | null {
   if (typeof v !== "string") return null;
