@@ -82,3 +82,8 @@ export async function speakTutorLinePreferOpenAi(
   const ok = await speakTutorLine(text, callbacks);
   if (!ok) speakTutorLineBrowserFallback(text, callbacks);
 }
+
+/** Instant playback for live voice chat (no TTS API round-trip). */
+export function speakTutorLineImmediate(text: string, callbacks: PracticeSpeakCallbacks): void {
+  speakTutorLineBrowserFallback(text, callbacks);
+}

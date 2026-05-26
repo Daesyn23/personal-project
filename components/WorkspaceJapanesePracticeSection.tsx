@@ -17,6 +17,16 @@ import {
 import { VoiceActivityVisualizer } from "@/components/VoiceActivityVisualizer";
 import { TUTOR_NAME, type JlptPracticeLevel } from "@/lib/japanese-practice-prompt";
 import {
+  pullSpeakableChunks,
+  remainingSpeakableTail,
+} from "@/lib/practice-speak-chunks";
+import {
+  cancelPracticeSpeakQueue,
+  enqueuePracticeSpeech,
+  whenPracticeSpeakQueueIdle,
+} from "@/lib/practice-speak-queue";
+import { streamPracticeChat } from "@/lib/practice-stream-client";
+import {
   cancelPracticeVoicePlayback,
   speakTutorLinePreferOpenAi,
 } from "@/lib/practice-voice-playback";
@@ -25,7 +35,7 @@ import { startVoiceLevelMonitor } from "@/lib/voice-level-monitor";
 
 const STORAGE_KEY = "workspace-japanese-practice-v1";
 const MAX_INPUT = 4000;
-const LISTEN_AFTER_SPEAK_MS = 120;
+const LISTEN_AFTER_SPEAK_MS = 80;
 const MAX_CONTEXT_TURNS = 10;
 
 const jpFontClass =
@@ -133,7 +143,7 @@ function phaseHeadline(
   if (phase === "speaking") return `Listen to ${TUTOR_NAME}`;
   if (interim) return "Got it…";
   if (phase === "listening") {
-    if (speechActive) return "Keep going — pause 1s when done";
+    if (speechActive) return "Keep going — brief pause when done";
     const lang =
       detected !== "unknown" ? ` · ${detectedLanguageLabel(detected)}` : "";
     return `Speak now${lang}`;
@@ -283,6 +293,7 @@ export function WorkspaceJapanesePracticeSection() {
   }, []);
 
   const stopSpeak = useCallback(() => {
+    cancelPracticeSpeakQueue();
     cancelPracticeVoicePlayback();
     setSpeakingId(null);
     if (phase === "speaking") setPhase("idle");
@@ -342,7 +353,8 @@ export function WorkspaceJapanesePracticeSection() {
     const session = startUtteranceRecognition({
       lang,
       audioTrack: practiceMicRef.current?.track,
-      silenceMs: 1000,
+      silenceMs: 650,
+      silenceMsAfterFinal: 360,
       onListening: () => setPhase("listening"),
       onSpeechActivity: bumpSpeechActivity,
       onInterim: (text) => {
@@ -414,7 +426,13 @@ export function WorkspaceJapanesePracticeSection() {
 
       const userMsg: ChatMessage = { id: id(), role: "user", content: t };
       const history = [...messagesRef.current, userMsg].slice(-MAX_CONTEXT_TURNS);
-      setMessages(history);
+      const assistantId = id();
+      const assistantPlaceholder: ChatMessage = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+      };
+      setMessages([...history, assistantPlaceholder]);
       listenLangRef.current = detectedLanguageToSpeechLang(detected, t);
       setDraft("");
       setLoading(true);
@@ -422,41 +440,113 @@ export function WorkspaceJapanesePracticeSection() {
       setPhase("thinking");
       setError(null);
 
-      try {
-        const res = await fetch("/api/japanese/practice-chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jlptLevel: jlptLevelRef.current,
-            messages: history.map((m) => ({ role: m.role, content: m.content })),
-          }),
-        });
-        const data = (await res.json()) as {
-          text?: string;
-          error?: string;
-          detectedLanguage?: DetectedLanguage;
-        };
-        if (!res.ok) throw new Error(data.error || "Practice chat failed.");
-        const reply = (data.text ?? "").trim();
-        if (!reply) throw new Error("Empty response from tutor.");
-        const replyDetected = detectUtteranceLanguage(reply);
-        setDetectedLang(replyDetected);
-        const assistantMsg: ChatMessage = { id: id(), role: "assistant", content: reply };
-        setMessages((prev) => [...prev, assistantMsg]);
+      const useLiveVoice =
+        voiceSessionRef.current && autoSpeakRef.current && ttsSupportedRef.current;
+      let spokenUpTo = 0;
+      let startedSpeaking = false;
 
-        const afterReply = () => {
-          if (voiceSessionRef.current) scheduleListenAfterReply();
-        };
+      const afterReply = () => {
+        if (voiceSessionRef.current) scheduleListenAfterReply();
+      };
 
-        setPhase(autoSpeakRef.current && ttsSupportedRef.current ? "speaking" : "idle");
-        if (autoSpeakRef.current && ttsSupportedRef.current) {
-          speakMessage(assistantMsg.id, reply, afterReply);
-        } else {
-          afterReply();
+      const onVoiceReplyDone = () => {
+        setSpeakingId(null);
+        setPhase("idle");
+        afterReply();
+      };
+
+      const maybeSpeakFromStream = (accumulated: string) => {
+        if (!useLiveVoice) return;
+        const { chunks, newSpokenUpTo } = pullSpeakableChunks(accumulated, spokenUpTo);
+        spokenUpTo = newSpokenUpTo;
+        if (chunks.length === 0) return;
+        if (!startedSpeaking) {
+          startedSpeaking = true;
+          setPhase("speaking");
+          setSpeakingId(assistantId);
         }
+        enqueuePracticeSpeech(chunks);
+      };
+
+      const finishSpeech = (reply: string) => {
+        if (!autoSpeakRef.current || !ttsSupportedRef.current) {
+          afterReply();
+          return;
+        }
+        if (useLiveVoice) {
+          const tail = remainingSpeakableTail(reply, spokenUpTo);
+          if (!startedSpeaking) {
+            setPhase("speaking");
+            setSpeakingId(assistantId);
+            enqueuePracticeSpeech([reply], { onEnd: onVoiceReplyDone });
+          } else if (tail) {
+            enqueuePracticeSpeech([tail], { onEnd: onVoiceReplyDone });
+          } else {
+            whenPracticeSpeakQueueIdle(onVoiceReplyDone);
+          }
+          return;
+        }
+        setPhase("speaking");
+        speakMessage(assistantId, reply, afterReply);
+      };
+
+      try {
+        const apiMessages = history.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+
+        let reply = "";
+        try {
+          const streamed = await streamPracticeChat(
+            {
+              jlptLevel: jlptLevelRef.current,
+              messages: apiMessages,
+            },
+            (accumulated) => {
+              reply = accumulated;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: accumulated } : m))
+              );
+              maybeSpeakFromStream(accumulated);
+            }
+          );
+          reply = streamed.text;
+          if (streamed.detectedLanguage) {
+            setDetectedLang(streamed.detectedLanguage);
+          }
+        } catch {
+          const res = await fetch("/api/japanese/practice-chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jlptLevel: jlptLevelRef.current,
+              messages: apiMessages,
+            }),
+          });
+          const data = (await res.json()) as {
+            text?: string;
+            error?: string;
+            detectedLanguage?: DetectedLanguage;
+          };
+          if (!res.ok) throw new Error(data.error || "Practice chat failed.");
+          reply = (data.text ?? "").trim();
+          if (data.detectedLanguage) setDetectedLang(data.detectedLanguage);
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: reply } : m))
+          );
+        }
+
+        if (!reply.trim()) throw new Error("Empty response from tutor.");
+        setDetectedLang(detectUtteranceLanguage(reply));
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: reply } : m))
+        );
+        finishSpeech(reply);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
-        setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+        setMessages((prev) => prev.filter((m) => m.id !== userMsg.id && m.id !== assistantId));
+        cancelPracticeSpeakQueue();
         setPhase("idle");
         if (voiceSessionRef.current) scheduleListenAfterReply();
       } finally {
@@ -526,6 +616,7 @@ export function WorkspaceJapanesePracticeSection() {
       recognitionRef.current?.abort();
       stopVoiceMonitor();
       stopPracticeMic();
+      cancelPracticeSpeakQueue();
       cancelPracticeVoicePlayback();
     };
   }, [clearListenRestartTimer, stopVoiceMonitor, stopPracticeMic]);
@@ -702,7 +793,7 @@ export function WorkspaceJapanesePracticeSection() {
 
           <p className="mx-auto mt-5 max-w-md text-center text-xs leading-relaxed text-stone-500">
             {voiceSession
-              ? `Hands-free — pause 1 second when you finish. ${TUTOR_NAME} listens again after she speaks.`
+              ? `Hands-free — pause briefly when you finish. ${TUTOR_NAME} replies as soon as she can.`
               : "Japanese, English, or Tagalog. One tap, no holding buttons."}
           </p>
         </div>
@@ -829,7 +920,7 @@ export function WorkspaceJapanesePracticeSection() {
                 onChange={(e) => setAutoSpeak(e.target.checked)}
                 className="rounded border-stone-300 text-pink-600 focus:ring-pink-400"
               />
-              {TUTOR_NAME}&apos;s voice (natural)
+              {TUTOR_NAME}&apos;s voice (fast in live chat)
             </label>
           </div>
         </div>

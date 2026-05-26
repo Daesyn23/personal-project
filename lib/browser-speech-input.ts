@@ -4,7 +4,8 @@
 
 export type SpeechInputLang = "ja-JP" | "en-US" | "fil-PH";
 
-const DEFAULT_SILENCE_MS = 1000;
+const DEFAULT_SILENCE_MS = 700;
+const DEFAULT_SILENCE_AFTER_FINAL_MS = 380;
 const MIN_UTTERANCE_CHARS = 1;
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
@@ -56,8 +57,10 @@ export type StartUtteranceRecognitionOptions = {
   lang: SpeechInputLang;
   /** Noise-cancelled mic track from `acquirePracticeMic` (Chrome/Edge). */
   audioTrack?: MediaStreamTrack;
-  /** Ms of silence after last heard speech before auto-submit (default 1000). */
+  /** Ms of silence while interim results are updating (default 700). */
   silenceMs?: number;
+  /** Shorter silence after a final transcript chunk (default 380). */
+  silenceMsAfterFinal?: number;
   onInterim?: (text: string) => void;
   /** Fired when the engine hears any speech (for UI). */
   onSpeechActivity?: () => void;
@@ -82,6 +85,7 @@ export function startUtteranceRecognition(
 
   const rec = new Ctor();
   const silenceMs = options.silenceMs ?? DEFAULT_SILENCE_MS;
+  const silenceMsAfterFinal = options.silenceMsAfterFinal ?? DEFAULT_SILENCE_AFTER_FINAL_MS;
   let silenceTimer: ReturnType<typeof setTimeout> | null = null;
   let finalParts: string[] = [];
   let latestInterim = "";
@@ -109,15 +113,16 @@ export function startUtteranceRecognition(
     }
   };
 
-  const scheduleSilenceEnd = () => {
+  const scheduleSilenceEnd = (afterFinal = false) => {
     clearSilenceTimer();
+    const delay = afterFinal && !latestInterim ? silenceMsAfterFinal : silenceMs;
     silenceTimer = setTimeout(() => {
       try {
         rec.stop();
       } catch {
         flushComplete();
       }
-    }, silenceMs);
+    }, delay);
   };
 
   rec.lang = options.lang;
@@ -140,6 +145,8 @@ export function startUtteranceRecognition(
       if (row.isFinal) {
         finalParts.push(t);
         latestInterim = "";
+        options.onInterim?.(finalParts.join(" ").trim());
+        scheduleSilenceEnd(true);
       } else {
         interim += (interim ? " " : "") + t;
       }
@@ -147,10 +154,10 @@ export function startUtteranceRecognition(
     if (interim) {
       latestInterim = interim;
       options.onInterim?.([...finalParts, interim].filter(Boolean).join(" ").trim());
-      scheduleSilenceEnd();
+      scheduleSilenceEnd(false);
     } else if (finalParts.length > 0) {
       options.onInterim?.(finalParts.join(" ").trim());
-      scheduleSilenceEnd();
+      scheduleSilenceEnd(true);
     }
   };
 

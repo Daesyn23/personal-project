@@ -11,7 +11,9 @@ import {
 } from "@/lib/japanese-practice-prompt";
 import {
   isOpenAiChatConfigured,
+  openaiChatCompletionStream,
   openaiChatCompletionText,
+  resolveOpenAiChatModelId,
   type OpenAiChatMessage,
 } from "@/lib/openai-chat";
 
@@ -113,11 +115,63 @@ export async function POST(req: Request) {
     })),
   ];
 
+  const wantStream =
+    body &&
+    typeof body === "object" &&
+    (body as { stream?: unknown }).stream === true;
+
+  if (wantStream) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (payload: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        };
+        try {
+          let full = "";
+          const gen = openaiChatCompletionStream({
+            messages: openAiMessages,
+            temperature: 0.82,
+            maxTokens: 160,
+          });
+          let model = resolveOpenAiChatModelId();
+          while (true) {
+            const next = await gen.next();
+            if (next.done) {
+              model = next.value?.model ?? model;
+              break;
+            }
+            full += next.value;
+            send({ delta: next.value });
+          }
+          send({
+            done: true,
+            text: full.trim(),
+            model,
+            detectedLanguage: detected !== "unknown" ? detected : undefined,
+          });
+          controller.close();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Practice chat failed.";
+          send({ error: msg });
+          controller.close();
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
   try {
     const { text, model } = await openaiChatCompletionText({
       messages: openAiMessages,
       temperature: 0.82,
-      maxTokens: 200,
+      maxTokens: 160,
     });
     return NextResponse.json({
       text,
