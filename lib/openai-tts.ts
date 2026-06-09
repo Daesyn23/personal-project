@@ -5,12 +5,29 @@
 
 const OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech";
 
-export const DEFAULT_OPENAI_TTS_VOICE = "nova";
+/** Warm, expressive default for Berry (override with OPENAI_TTS_VOICE). */
+export const DEFAULT_OPENAI_TTS_VOICE = "coral";
 /** gpt-4o-mini-tts supports naturalness via `instructions`; tts-1 is faster but flatter. */
 export const DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
 
-const DEFAULT_PRACTICE_TTS_INSTRUCTIONS =
-  "Speak naturally and conversationally, like a friendly tutor in a casual chat. Warm, relaxed intonation — not robotic, not announcer-like. Gentle everyday pace.";
+export type PracticeTtsRegister = "polite" | "casual";
+
+/** Prosody instructions for OpenAI gpt-4o-mini-tts (Berry practice). */
+export function buildPracticeTtsInstructions(register: PracticeTtsRegister = "polite"): string {
+  const registerNote =
+    register === "polite"
+      ? "Japanese lines use warm polite です／ます — friendly, not stiff broadcast Japanese."
+      : "Japanese lines use casual plain speech — relaxed friend tone, not slangy host.";
+  return [
+    "You are Berry（ベリー）, a warm young woman voice-chatting with a friend in the Philippines.",
+    "Sound fully human and alive — NEVER flat, monotone, or text-to-speech robotic.",
+    "Vary pitch and energy: lift slightly on questions, soften on empathy, gentle brightness on greetings and いいね moments.",
+    "Use natural conversational rhythm with brief pauses at commas and 、; phrase boundaries should breathe.",
+    registerNote,
+    "Taglish: like a real Manila friend — warm, light, mixed Tagalog-English, not announcer English.",
+    "Keep an easy everyday pace; smile in your voice; never rush or drone.",
+  ].join(" ");
+}
 
 export function isOpenAiTtsConfigured(): boolean {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
@@ -26,12 +43,12 @@ export function resolveOpenAiTtsModel(): string {
   return raw && raw.length > 0 ? raw : DEFAULT_OPENAI_TTS_MODEL;
 }
 
-export function resolveOpenAiTtsInstructions(): string | undefined {
+export function resolveOpenAiTtsInstructions(register: PracticeTtsRegister = "polite"): string | undefined {
   const raw = process.env.OPENAI_TTS_INSTRUCTIONS?.trim();
   if (raw && raw.length > 0) return raw;
   const model = resolveOpenAiTtsModel();
   if (model.includes("gpt-4o-mini-tts") || model.includes("gpt-4o-mini")) {
-    return DEFAULT_PRACTICE_TTS_INSTRUCTIONS;
+    return buildPracticeTtsInstructions(register);
   }
   return undefined;
 }
@@ -51,16 +68,20 @@ export function textForTutorSpeech(raw: string): string {
     .trim();
 }
 
-export async function openaiTextToSpeechMp3(text: string): Promise<{ bytes: Uint8Array; voice: string }> {
+export async function openaiTextToSpeechMp3(
+  text: string,
+  options?: { register?: PracticeTtsRegister }
+): Promise<{ bytes: Uint8Array; voice: string }> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set.");
 
   const input = textForTutorSpeech(text);
   if (!input) throw new Error("Nothing to speak.");
 
+  const register = options?.register === "casual" ? "casual" : "polite";
   const voice = resolveOpenAiTtsVoice();
   const model = resolveOpenAiTtsModel();
-  const instructions = resolveOpenAiTtsInstructions();
+  const instructions = resolveOpenAiTtsInstructions(register);
 
   const payload: Record<string, unknown> = {
     model,
@@ -71,7 +92,7 @@ export async function openaiTextToSpeechMp3(text: string): Promise<{ bytes: Uint
   if (instructions && supportsTtsInstructions(model)) {
     payload.instructions = instructions;
   } else {
-    payload.speed = 0.98;
+    payload.speed = 1;
   }
 
   const res = await fetch(OPENAI_SPEECH_URL, {

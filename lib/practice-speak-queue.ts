@@ -1,12 +1,49 @@
 /**
- * Queue browser TTS lines for practice — starts the next line when the previous ends.
+ * Queue tutor speech for practice — OpenAI TTS first (natural), browser fallback.
  */
 
-import { speakTutorLineBrowserFallback, type PracticeSpeakCallbacks } from "@/lib/practice-voice-playback";
+import type { PracticeTtsRegister } from "@/lib/openai-tts";
+import {
+  prefetchTutorLine,
+  speakTutorLine,
+  speakTutorLineBrowserFallback,
+  type PracticeSpeakCallbacks,
+} from "@/lib/practice-voice-playback";
 
-let queue: string[] = [];
+type QueuedLine = { text: string; register: PracticeTtsRegister };
+
+let queue: QueuedLine[] = [];
 let draining = false;
 let sessionCallbacks: PracticeSpeakCallbacks | null = null;
+let defaultRegister: PracticeTtsRegister = "polite";
+
+function mergeSessionCallbacks(callbacks?: PracticeSpeakCallbacks): void {
+  if (!callbacks) return;
+  if (!sessionCallbacks) {
+    sessionCallbacks = callbacks;
+    return;
+  }
+  if (callbacks.onEnd) {
+    const prevEnd = sessionCallbacks.onEnd;
+    sessionCallbacks = {
+      ...sessionCallbacks,
+      onEnd: () => {
+        prevEnd?.();
+        callbacks.onEnd?.();
+      },
+    };
+  }
+  if (callbacks.onError) {
+    const prevErr = sessionCallbacks.onError;
+    sessionCallbacks = {
+      ...sessionCallbacks,
+      onError: (code) => {
+        prevErr?.(code);
+        callbacks.onError?.(code);
+      },
+    };
+  }
+}
 
 function drain(): void {
   if (draining || queue.length === 0) {
@@ -18,43 +55,69 @@ function drain(): void {
   }
 
   draining = true;
-  const line = queue.shift()!;
-  speakTutorLineBrowserFallback(line, {
-    onEnd: () => {
-      draining = false;
-      drain();
-    },
-    onError: (code) => {
-      draining = false;
-      sessionCallbacks?.onError?.(code);
-      drain();
-    },
-  });
+  const { text, register } = queue.shift()!;
+  const speakOpts = { speechRegister: register };
+
+  if (queue.length > 0) {
+    prefetchTutorLine(queue[0]!.text, { speechRegister: queue[0]!.register });
+  }
+
+  void (async () => {
+    const played = await speakTutorLine(text, {
+      onEnd: () => {
+        draining = false;
+        drain();
+      },
+      onError: (code) => {
+        sessionCallbacks?.onError?.(code);
+        draining = false;
+        drain();
+      },
+    }, speakOpts);
+
+    if (!played) {
+      speakTutorLineBrowserFallback(text, {
+        onEnd: () => {
+          draining = false;
+          drain();
+        },
+        onError: (code) => {
+          sessionCallbacks?.onError?.(code);
+          draining = false;
+          drain();
+        },
+      });
+    }
+  })();
 }
 
 /** Append lines to speak; `onEnd` fires when the whole queue finishes. */
-export function enqueuePracticeSpeech(lines: string[], callbacks?: PracticeSpeakCallbacks): void {
+export function enqueuePracticeSpeech(
+  lines: string[],
+  callbacks?: PracticeSpeakCallbacks,
+  options?: { speechRegister?: PracticeTtsRegister }
+): void {
+  const register = options?.speechRegister === "casual" ? "casual" : defaultRegister;
   const trimmed = lines.map((l) => l.trim()).filter(Boolean);
   if (trimmed.length === 0) {
     callbacks?.onEnd?.();
     return;
   }
 
-  if (!sessionCallbacks && callbacks) {
-    sessionCallbacks = callbacks;
-  } else if (callbacks?.onEnd) {
-    const prevEnd = sessionCallbacks?.onEnd;
-    sessionCallbacks = {
-      ...sessionCallbacks,
-      onEnd: () => {
-        prevEnd?.();
-        callbacks.onEnd?.();
-      },
-    };
+  mergeSessionCallbacks(callbacks);
+
+  for (const text of trimmed) {
+    queue.push({ text, register });
   }
 
-  queue.push(...trimmed);
+  if (!draining && queue.length > 0) {
+    prefetchTutorLine(queue[0]!.text, { speechRegister: queue[0]!.register });
+  }
   if (!draining) drain();
+}
+
+export function setPracticeSpeakRegister(register: PracticeTtsRegister): void {
+  defaultRegister = register === "casual" ? "casual" : "polite";
 }
 
 export function cancelPracticeSpeakQueue(): void {

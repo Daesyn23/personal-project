@@ -51,6 +51,68 @@ body {
   }
 }
 
+/* Review cards: slide to next / previous card */
+@keyframes review-card-exit-left {
+  to {
+    opacity: 0;
+    transform: translateX(-22%) scale(0.97);
+  }
+}
+
+@keyframes review-card-exit-right {
+  to {
+    opacity: 0;
+    transform: translateX(22%) scale(0.97);
+  }
+}
+
+@keyframes review-card-enter-right {
+  from {
+    opacity: 0;
+    transform: translateX(22%) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes review-card-enter-left {
+  from {
+    opacity: 0;
+    transform: translateX(-22%) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.review-card-exit-left {
+  animation: review-card-exit-left 0.32s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.review-card-exit-right {
+  animation: review-card-exit-right 0.32s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.review-card-enter-right {
+  animation: review-card-enter-right 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.review-card-enter-left {
+  animation: review-card-enter-left 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-card-exit-left,
+  .review-card-exit-right,
+  .review-card-enter-right,
+  .review-card-enter-left {
+    animation: none;
+  }
+}
+
 /* —— Seasonal background: blush pink, airy light (winter cool + spring warmth) —— */
 .seasonal-backdrop-gradient {
   background:

@@ -30,6 +30,26 @@ export type FlashcardDraft = Omit<FlashcardRow, "id" | "created_at"> & {
   id?: string;
 };
 
+export type ReviewFolderRow = {
+  id: string;
+  name: string;
+  created_at?: string;
+  item_count?: number;
+};
+
+export type ReviewItemRow = {
+  id: string;
+  folder_id: string;
+  /** Hiragana reading */
+  kana: string;
+  /** English meaning */
+  definition: string;
+  kanji: string;
+  position: number;
+  starred: boolean;
+  created_at?: string;
+};
+
 export type WorkspaceFolderRow = {
   id: string;
   name: string;

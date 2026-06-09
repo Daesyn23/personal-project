@@ -107,9 +107,13 @@ const VOICE_RETRY_ERRORS = new Set([
 
 /**
  * Speak Japanese (or kana-heavy) text with a Japanese voice when available.
- * @param kind "reading" uses a slightly slower rate (matches translation UI).
+ * @param kind "reading" = slower; "practice" = conversational tutor pace.
  */
-export function speakJapaneseLine(text: string, kind: "japanese" | "reading", callbacks: SpeakCallbacks): void {
+export function speakJapaneseLine(
+  text: string,
+  kind: "japanese" | "reading" | "practice",
+  callbacks: SpeakCallbacks
+): void {
   const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
   if (!synth) {
     callbacks.onError?.("no-api");
@@ -141,8 +145,8 @@ export function speakJapaneseLine(text: string, kind: "japanese" | "reading", ca
       } else {
         u.lang = shortJa ? "ja" : "ja-JP";
       }
-      u.rate = Math.min(1, kind === "reading" ? 0.88 : 0.9);
-      u.pitch = 1;
+      u.rate = Math.min(1, kind === "reading" ? 0.88 : kind === "practice" ? 0.96 : 0.9);
+      u.pitch = kind === "practice" ? 1.04 : 1;
       u.onend = () => callbacks.onEnd?.();
       u.onerror = (ev) => {
         const e = ev as SpeechSynthesisErrorEvent;
@@ -181,7 +185,11 @@ export function speakJapaneseLine(text: string, kind: "japanese" | "reading", ca
 }
 
 /** Speak Latin-script lines (romaji, English gloss) with an English voice when available. */
-export function speakEnglishLine(text: string, callbacks: SpeakCallbacks): void {
+export function speakEnglishLine(
+  text: string,
+  callbacks: SpeakCallbacks,
+  kind: "default" | "practice" = "default"
+): void {
   const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
   if (!synth) {
     callbacks.onError?.("no-api");
@@ -213,8 +221,8 @@ export function speakEnglishLine(text: string, callbacks: SpeakCallbacks): void 
       } else {
         u.lang = "en-US";
       }
-      u.rate = Math.min(1, 0.9);
-      u.pitch = 1;
+      u.rate = Math.min(1, kind === "practice" ? 0.96 : 0.9);
+      u.pitch = kind === "practice" ? 1.03 : 1;
       u.onend = () => callbacks.onEnd?.();
       u.onerror = (ev) => {
         const e = ev as SpeechSynthesisErrorEvent;

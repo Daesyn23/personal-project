@@ -15,6 +15,7 @@ import { WorkspaceGoogleSheetSection } from "@/components/WorkspaceGoogleSheetSe
 import { WorkspaceTimerSection } from "@/components/WorkspaceTimerSection";
 import { WorkspaceJapaneseGrammarSection } from "@/components/WorkspaceJapaneseGrammarSection";
 import { WorkspaceJapanesePracticeSection } from "@/components/WorkspaceJapanesePracticeSection";
+import { WorkspaceReviewSection } from "@/components/WorkspaceReviewSection";
 import { WorkspaceLessonPlanSection } from "@/components/WorkspaceLessonPlanSection";
 import { WorkspaceTranslationSection } from "@/components/WorkspaceTranslationSection";
 import { WorkspaceYoutubeSection } from "@/components/WorkspaceYoutubeSection";
@@ -44,6 +45,7 @@ function tileLabel(card: FlashcardRow): string {
 type WorkspaceArea =
   | "documents"
   | "flashcards"
+  | "review"
   | "audioLesson"
   | "googleSheet"
   | "timer"
@@ -56,6 +58,7 @@ type WorkspaceArea =
 const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
   { id: "documents", label: "Documents" },
   { id: "flashcards", label: "Flashcards" },
+  { id: "review", label: "Review" },
   { id: "audioLesson", label: "Audio Lesson" },
   { id: "googleSheet", label: "Google Sheet" },
   { id: "timer", label: "Timer" },
@@ -125,6 +128,7 @@ export default function HomePage() {
       workspaceArea === "translate" ||
       workspaceArea === "grammar" ||
       workspaceArea === "japanesePractice" ||
+      workspaceArea === "review" ||
       workspaceArea === "youtube" ||
       workspaceArea === "lessonPlan" ||
       workspaceArea === "audioLesson"
@@ -363,6 +367,8 @@ export default function HomePage() {
           <WorkspaceJapaneseGrammarSection />
         ) : workspaceArea === "japanesePractice" ? (
           <WorkspaceJapanesePracticeSection />
+        ) : workspaceArea === "review" ? (
+          <WorkspaceReviewSection />
         ) : workspaceArea === "youtube" ? (
           <WorkspaceYoutubeSection />
         ) : workspaceArea === "lessonPlan" ? (

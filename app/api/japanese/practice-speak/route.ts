@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { isOpenAiTtsConfigured, openaiTextToSpeechMp3 } from "@/lib/openai-tts";
+import {
+  isOpenAiTtsConfigured,
+  openaiTextToSpeechMp3,
+  type PracticeTtsRegister,
+} from "@/lib/openai-tts";
 
 export const runtime = "nodejs";
 
@@ -32,8 +36,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `text max ${MAX_SPEAK_CHARS} characters.` }, { status: 400 });
   }
 
+  const speechRegister: PracticeTtsRegister =
+    body &&
+    typeof body === "object" &&
+    (body as { speechRegister?: unknown }).speechRegister === "casual"
+      ? "casual"
+      : "polite";
+
   try {
-    const { bytes, voice } = await openaiTextToSpeechMp3(text);
+    const { bytes, voice } = await openaiTextToSpeechMp3(text, { register: speechRegister });
     return new NextResponse(bytes as unknown as BodyInit, {
       status: 200,
       headers: {

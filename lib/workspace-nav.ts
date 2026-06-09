@@ -3,6 +3,7 @@
 export type WorkspaceNavigateArea =
   | "documents"
   | "flashcards"
+  | "review"
   | "audioLesson"
   | "googleSheet"
   | "timer"

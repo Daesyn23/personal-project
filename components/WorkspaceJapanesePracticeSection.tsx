@@ -27,11 +27,19 @@ import {
 import {
   cancelPracticeSpeakQueue,
   enqueuePracticeSpeech,
+  setPracticeSpeakRegister,
   whenPracticeSpeakQueueIdle,
 } from "@/lib/practice-speak-queue";
 import { streamPracticeChat } from "@/lib/practice-stream-client";
 import {
+  displayTranscriptLine,
+  fetchKanaReadings,
+  lineNeedsKanaReading,
+  type PracticeTranscriptScript,
+} from "@/lib/practice-transcript-display";
+import {
   cancelPracticeVoicePlayback,
+  clearPracticeTtsPrefetch,
   speakTutorLinePreferOpenAi,
 } from "@/lib/practice-voice-playback";
 import { acquirePracticeMic, type PracticeMicSession } from "@/lib/practice-mic";
@@ -67,6 +75,7 @@ type StoredState = {
   messages: ChatMessage[];
   jlptLevel: JlptPracticeLevel;
   speechRegister: PracticeSpeechRegister;
+  transcriptScript: PracticeTranscriptScript;
   autoSpeak: boolean;
 };
 
@@ -79,6 +88,7 @@ function loadStored(): StoredState {
     messages: [],
     jlptLevel: "N5",
     speechRegister: "polite",
+    transcriptScript: "normal",
     autoSpeak: true,
   };
   if (typeof window === "undefined") return fallback;
@@ -105,6 +115,7 @@ function loadStored(): StoredState {
       messages: messages.slice(-30),
       jlptLevel: p.jlptLevel === "N4" ? "N4" : "N5",
       speechRegister: p.speechRegister === "casual" ? "casual" : "polite",
+      transcriptScript: p.transcriptScript === "kana" ? "kana" : "normal",
       autoSpeak: p.autoSpeak !== false,
     };
   } catch {
@@ -168,6 +179,12 @@ export function WorkspaceJapanesePracticeSection() {
   const [speechRegister, setSpeechRegister] = useState<PracticeSpeechRegister>(
     initial.speechRegister
   );
+  const [transcriptScript, setTranscriptScript] = useState<PracticeTranscriptScript>(
+    initial.transcriptScript
+  );
+  const [kanaReadings, setKanaReadings] = useState<Record<string, string>>({});
+  const [kanaReadingsLoading, setKanaReadingsLoading] = useState(false);
+  const [kanaReadingsError, setKanaReadingsError] = useState<string | null>(null);
   const [autoSpeak, setAutoSpeak] = useState(initial.autoSpeak);
   const [detectedLang, setDetectedLang] = useState<DetectedLanguage>("unknown");
   const [voiceSession, setVoiceSession] = useState(false);
@@ -214,6 +231,7 @@ export function WorkspaceJapanesePracticeSection() {
   messagesRef.current = messages;
   jlptLevelRef.current = jlptLevel;
   speechRegisterRef.current = speechRegister;
+  setPracticeSpeakRegister(speechRegister);
   autoSpeakRef.current = autoSpeak;
   ttsSupportedRef.current = ttsSupported;
 
@@ -231,8 +249,55 @@ export function WorkspaceJapanesePracticeSection() {
   }, []);
 
   useEffect(() => {
-    saveStored({ messages, jlptLevel, speechRegister, autoSpeak });
-  }, [messages, jlptLevel, speechRegister, autoSpeak]);
+    saveStored({ messages, jlptLevel, speechRegister, transcriptScript, autoSpeak });
+  }, [messages, jlptLevel, speechRegister, transcriptScript, autoSpeak]);
+
+  useEffect(() => {
+    if (transcriptScript !== "kana") {
+      setKanaReadingsLoading(false);
+      setKanaReadingsError(null);
+      return;
+    }
+
+    const pending = messages.filter(
+      (m) => lineNeedsKanaReading(m.content) && !kanaReadings[m.id]?.trim()
+    );
+    if (pending.length === 0) {
+      setKanaReadingsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setKanaReadingsLoading(true);
+    setKanaReadingsError(null);
+
+    void (async () => {
+      try {
+        const readings = await fetchKanaReadings(pending.map((m) => m.content));
+        if (cancelled) return;
+        setKanaReadings((prev) => {
+          const next = { ...prev };
+          pending.forEach((m, i) => {
+            const r = readings[i]?.trim();
+            if (r) next[m.id] = r;
+          });
+          return next;
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setKanaReadingsError(
+            e instanceof Error ? e.message : "Could not load hiragana readings."
+          );
+        }
+      } finally {
+        if (!cancelled) setKanaReadingsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [transcriptScript, messages, kanaReadings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -335,21 +400,25 @@ export function WorkspaceJapanesePracticeSection() {
     setPhase("speaking");
     setError(null);
     setSpeakingId(messageId);
-    void speakTutorLinePreferOpenAi(text, {
-      onEnd: () => {
-        setSpeakingId(null);
-        setPhase("idle");
-        onDone?.();
+    void speakTutorLinePreferOpenAi(
+      text,
+      {
+        onEnd: () => {
+          setSpeakingId(null);
+          setPhase("idle");
+          onDone?.();
+        },
+        onError: (code) => {
+          setSpeakingId(null);
+          setPhase("idle");
+          if (code === "not-allowed") {
+            setError("Speech was blocked. Allow sound for this site, then try again.");
+          }
+          onDone?.();
+        },
       },
-      onError: (code) => {
-        setSpeakingId(null);
-        setPhase("idle");
-        if (code === "not-allowed") {
-          setError("Speech was blocked. Allow sound for this site, then try again.");
-        }
-        onDone?.();
-      },
-    });
+      { speechRegister: speechRegisterRef.current }
+    );
   }, []);
 
   const beginListeningRef = useRef<(() => void) | null>(null);
@@ -487,7 +556,9 @@ export function WorkspaceJapanesePracticeSection() {
           setPhase("speaking");
           setSpeakingId(assistantId);
         }
-        enqueuePracticeSpeech(chunks);
+        enqueuePracticeSpeech(chunks, undefined, {
+          speechRegister: speechRegisterRef.current,
+        });
       };
 
       const finishSpeech = (reply: string) => {
@@ -500,9 +571,13 @@ export function WorkspaceJapanesePracticeSection() {
           if (!startedSpeaking) {
             setPhase("speaking");
             setSpeakingId(assistantId);
-            enqueuePracticeSpeech([reply], { onEnd: onVoiceReplyDone });
+            enqueuePracticeSpeech([reply], { onEnd: onVoiceReplyDone }, {
+              speechRegister: speechRegisterRef.current,
+            });
           } else if (tail) {
-            enqueuePracticeSpeech([tail], { onEnd: onVoiceReplyDone });
+            enqueuePracticeSpeech([tail], { onEnd: onVoiceReplyDone }, {
+              speechRegister: speechRegisterRef.current,
+            });
           } else {
             whenPracticeSpeakQueueIdle(onVoiceReplyDone);
           }
@@ -596,6 +671,7 @@ export function WorkspaceJapanesePracticeSection() {
     stopVoiceMonitor();
     stopPracticeMic();
     stopSpeak();
+    clearPracticeTtsPrefetch();
     setPhase("idle");
     setInterim("");
   }, [clearListenRestartTimer, abortListening, stopVoiceMonitor, stopPracticeMic, stopSpeak]);
@@ -630,6 +706,8 @@ export function WorkspaceJapanesePracticeSection() {
   const clearChat = useCallback(() => {
     stopVoiceSession();
     setMessages([]);
+    setKanaReadings({});
+    setKanaReadingsError(null);
     setDraft("");
     setError(null);
   }, [stopVoiceSession]);
@@ -642,6 +720,7 @@ export function WorkspaceJapanesePracticeSection() {
       stopPracticeMic();
       cancelPracticeSpeakQueue();
       cancelPracticeVoicePlayback();
+      clearPracticeTtsPrefetch();
     };
   }, [clearListenRestartTimer, stopVoiceMonitor, stopPracticeMic]);
 
@@ -890,11 +969,59 @@ export function WorkspaceJapanesePracticeSection() {
             </span>
           </button>
           {showTranscript && (
-            <div className="max-h-[280px] min-h-[80px] space-y-3 overflow-y-auto border-t border-stone-100 px-4 py-4 sm:px-5">
+            <div className="border-t border-stone-100">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 bg-white px-4 py-2.5 sm:px-5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+                  Show as
+                </span>
+                <div
+                  className="inline-flex rounded-full bg-stone-100/90 p-0.5 ring-1 ring-stone-200/80"
+                  role="group"
+                  aria-label="Transcript script"
+                >
+                  {(
+                    [
+                      { id: "normal" as const, label: "Normal" },
+                      { id: "kana" as const, label: "Hiragana / Katakana" },
+                    ] as const
+                  ).map(({ id, label }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setTranscriptScript(id)}
+                      className={`rounded-full px-3 py-1 text-[11px] font-bold transition sm:text-xs ${
+                        transcriptScript === id
+                          ? "bg-white text-pink-700 shadow-sm ring-1 ring-pink-100"
+                          : "text-stone-600 hover:text-stone-900"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {transcriptScript === "kana" && kanaReadingsLoading && (
+                <p className="border-b border-stone-100 bg-violet-50/80 px-4 py-2 text-center text-[11px] font-medium text-violet-800 sm:px-5">
+                  Loading hiragana readings…
+                </p>
+              )}
+              {transcriptScript === "kana" && kanaReadingsError && (
+                <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-center text-[11px] text-amber-950 sm:px-5">
+                  {kanaReadingsError} Showing original text where readings are missing.
+                </p>
+              )}
+            <div className="max-h-[280px] min-h-[80px] space-y-3 overflow-y-auto px-4 py-4 sm:px-5">
               {messages.length === 0 && !loading && (
                 <p className="text-center text-xs text-stone-400">Your conversation will appear here.</p>
               )}
-              {messages.map((m) => (
+              {messages.map((m) => {
+                const body = displayTranscriptLine(
+                  m.content,
+                  transcriptScript,
+                  kanaReadings[m.id]
+                );
+                const jpLine = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/u.test(body);
+                return (
                 <div key={m.id} className={`flex gap-2 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
                   <div
                     className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
@@ -911,12 +1038,13 @@ export function WorkspaceJapanesePracticeSection() {
                       m.role === "user"
                         ? "rounded-tr-md bg-gradient-to-br from-pink-600 to-rose-600 text-white"
                         : "rounded-tl-md border border-stone-100 bg-white text-stone-800"
-                    } ${m.role === "assistant" ? jpFontClass : ""}`}
+                    } ${jpLine ? jpFontClass : ""}`}
                   >
-                    <p className="whitespace-pre-wrap">{m.content}</p>
+                    <p className="whitespace-pre-wrap">{body}</p>
                   </div>
                 </div>
-              ))}
+              );
+              })}
               {loading && (
                 <div className="flex gap-2">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pink-500 to-rose-600 text-xs font-bold text-white">
@@ -932,6 +1060,7 @@ export function WorkspaceJapanesePracticeSection() {
                 </div>
               )}
               <div ref={chatEndRef} />
+            </div>
             </div>
           )}
         </div>
@@ -989,7 +1118,7 @@ export function WorkspaceJapanesePracticeSection() {
                 onChange={(e) => setAutoSpeak(e.target.checked)}
                 className="rounded border-stone-300 text-pink-600 focus:ring-pink-400"
               />
-              {TUTOR_NAME}&apos;s voice (fast in live chat)
+              {TUTOR_NAME}&apos;s voice (natural)
             </label>
           </div>
         </div>
