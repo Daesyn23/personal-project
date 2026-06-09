@@ -196,9 +196,9 @@ export function BulkEditReviewItemsModal({ items, onClose, onSaved }: Props) {
             <thead>
               <tr className="border-b border-pink-100 text-neutral-500">
                 <th className="w-11 p-2 font-medium text-center">#</th>
-                <th className="p-2 font-medium">Hiragana (front)</th>
-                <th className="p-2 font-medium">English</th>
-                <th className="p-2 font-medium">Kanji (back)</th>
+                <th className="p-2 font-medium">Kanji (front)</th>
+                <th className="p-2 font-medium">Hiragana (back)</th>
+                <th className="p-2 font-medium">English (back)</th>
                 <th className="w-10 p-2" aria-label="Actions" />
               </tr>
             </thead>
@@ -219,6 +219,16 @@ export function BulkEditReviewItemsModal({ items, onClose, onSaved }: Props) {
                       spellCheck={false}
                       className={jpCellClass}
                       rows={2}
+                      value={row.kanji}
+                      onChange={(e) => updateRow(row.id, "kanji", e.target.value)}
+                    />
+                  </td>
+                  <td className="p-2">
+                    <textarea
+                      lang="ja"
+                      spellCheck={false}
+                      className={jpCellClass}
+                      rows={2}
                       value={row.kana}
                       onChange={(e) => updateRow(row.id, "kana", e.target.value)}
                     />
@@ -229,16 +239,6 @@ export function BulkEditReviewItemsModal({ items, onClose, onSaved }: Props) {
                       rows={2}
                       value={row.definition}
                       onChange={(e) => updateRow(row.id, "definition", e.target.value)}
-                    />
-                  </td>
-                  <td className="p-2">
-                    <textarea
-                      lang="ja"
-                      spellCheck={false}
-                      className={jpCellClass}
-                      rows={2}
-                      value={row.kanji}
-                      onChange={(e) => updateRow(row.id, "kanji", e.target.value)}
                     />
                   </td>
                   <td className="p-2">

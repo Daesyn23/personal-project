@@ -305,9 +305,9 @@ export function ImportReviewItems({ folderId, defaultFolderName, onImported }: P
                 <thead>
                   <tr className="border-b border-pink-100 text-neutral-500">
                     <th className="w-11 p-2 font-medium text-center">#</th>
-                    <th className="p-2 font-medium">Hiragana (front)</th>
-                    <th className="p-2 font-medium">English</th>
-                    <th className="p-2 font-medium">Kanji (back)</th>
+                    <th className="p-2 font-medium">Kanji (front)</th>
+                    <th className="p-2 font-medium">Hiragana (back)</th>
+                    <th className="p-2 font-medium">English (back)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -327,6 +327,16 @@ export function ImportReviewItems({ folderId, defaultFolderName, onImported }: P
                           spellCheck={false}
                           className={`w-full min-w-[120px] rounded border border-pink-100 bg-[#fffafc] px-2 py-1 text-base leading-snug ${jpFontClass}`}
                           rows={2}
+                          value={r.kanji}
+                          onChange={(e) => updateRow(r._key, "kanji", e.target.value)}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <textarea
+                          lang="ja"
+                          spellCheck={false}
+                          className={`w-full min-w-[120px] rounded border border-pink-100 bg-[#fffafc] px-2 py-1 text-base leading-snug ${jpFontClass}`}
+                          rows={2}
                           value={r.kana}
                           onChange={(e) => updateRow(r._key, "kana", e.target.value)}
                         />
@@ -338,16 +348,6 @@ export function ImportReviewItems({ folderId, defaultFolderName, onImported }: P
                           placeholder="English meaning"
                           value={r.definition}
                           onChange={(e) => updateRow(r._key, "definition", e.target.value)}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <textarea
-                          lang="ja"
-                          spellCheck={false}
-                          className={`w-full min-w-[120px] rounded border border-pink-100 bg-[#fffafc] px-2 py-1 text-base leading-snug ${jpFontClass}`}
-                          rows={2}
-                          value={r.kanji}
-                          onChange={(e) => updateRow(r._key, "kanji", e.target.value)}
                         />
                       </td>
                     </tr>

@@ -10,6 +10,7 @@ import {
   FLOATING_PANEL_ABOVE_ONE_FAB,
   onCloseFloatingPanels,
   onFloatingPanelOpen,
+  onPresentationMode,
   publishFloatingPanelOpen,
   requestCloseFloatingPanels,
 } from "@/lib/workspace-floating-panels";
@@ -71,6 +72,7 @@ export function FloatingTranslateWidget() {
   const sourceId = useId();
   const [open, setOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [presenting, setPresenting] = useState(false);
   const t = useWorkspaceTranslation();
   const { panelRef, panelStyle, onResizeHandlePointerDown } = useFloatingPanelSize(TRANSLATE_PANEL_SIZE, open);
 
@@ -98,6 +100,13 @@ export function FloatingTranslateWidget() {
   useEffect(() => {
     return onFloatingPanelOpen((id, isOpen) => {
       if (id === "chat") setChatOpen(isOpen);
+    });
+  }, []);
+
+  useEffect(() => {
+    return onPresentationMode((active) => {
+      setPresenting(active);
+      if (active) setOpen(false);
     });
   }, []);
 
@@ -142,7 +151,7 @@ export function FloatingTranslateWidget() {
 
   return (
     <>
-      {!chatOpen ? (
+      {!chatOpen && !presenting ? (
         <button
           type="button"
           onClick={toggleOpen}
@@ -159,7 +168,7 @@ export function FloatingTranslateWidget() {
         </button>
       ) : null}
 
-      {open && (
+      {open && !presenting && (
         <div
           ref={panelRef}
           id="floating-translate-panel"

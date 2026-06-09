@@ -18,6 +18,7 @@ import {
   FLOATING_PANEL_ABOVE_ONE_FAB,
   onCloseFloatingPanels,
   onFloatingPanelOpen,
+  onPresentationMode,
   publishFloatingPanelOpen,
   requestCloseFloatingPanels,
 } from "@/lib/workspace-floating-panels";
@@ -265,6 +266,7 @@ export function GeminiChatWidget() {
   const synced = isWorkspaceAiChatSynced();
   const [open, setOpen] = useState(false);
   const [translateOpen, setTranslateOpen] = useState(false);
+  const [presenting, setPresenting] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<AiConversationRow[]>([]);
@@ -461,6 +463,13 @@ export function GeminiChatWidget() {
   useEffect(() => {
     return onFloatingPanelOpen((id, isOpen) => {
       if (id === "translate") setTranslateOpen(isOpen);
+    });
+  }, []);
+
+  useEffect(() => {
+    return onPresentationMode((active) => {
+      setPresenting(active);
+      if (active) setOpen(false);
     });
   }, []);
 
@@ -749,7 +758,7 @@ export function GeminiChatWidget() {
 
   return (
     <>
-      {!translateOpen ? (
+      {!translateOpen && !presenting ? (
         <button
           type="button"
           onClick={toggleChatOpen}
@@ -764,7 +773,7 @@ export function GeminiChatWidget() {
         </button>
       ) : null}
 
-      {open && (
+      {open && !presenting && (
         <div
           ref={panelRef}
           id="gemini-chat-panel"

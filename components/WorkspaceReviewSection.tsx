@@ -109,7 +109,7 @@ function NewFolderButton({ onCreated }: { onCreated: (id: string) => void }) {
                 </h2>
               }
             >
-              Each folder is a deck. Add hiragana, English, and kanji inside it.
+              Each folder is a deck. Add kanji, hiragana, and English inside it.
             </HeadingWithInfo>
             <label className="mt-4 block text-sm font-medium text-neutral-700" htmlFor="new-review-folder-name">
               Name
@@ -314,6 +314,15 @@ function EditReviewItemModal({
         </div>
         <div className="p-5 space-y-3">
           <label className="block text-xs font-medium text-neutral-600">
+            Kanji
+            <input
+              type="text"
+              className={`${inputClass} ${jpFontClass}`}
+              value={kanji}
+              onChange={(e) => setKanji(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs font-medium text-neutral-600">
             Hiragana
             <input
               type="text"
@@ -329,15 +338,6 @@ function EditReviewItemModal({
               className={inputClass}
               value={definition}
               onChange={(e) => setDefinition(e.target.value)}
-            />
-          </label>
-          <label className="block text-xs font-medium text-neutral-600">
-            Kanji
-            <input
-              type="text"
-              className={`${inputClass} ${jpFontClass}`}
-              value={kanji}
-              onChange={(e) => setKanji(e.target.value)}
             />
           </label>
           {error && (
@@ -523,7 +523,7 @@ export function WorkspaceReviewSection() {
           infoLabel="Review"
           heading={<h2 className="text-xl font-semibold text-neutral-900">Review</h2>}
         >
-          Flip cards: hiragana + English on the front, kanji on the back. Organize decks in folders.
+          Flip cards: kanji on the front, hiragana + English on the back. Organize decks in folders.
         </HeadingWithInfo>
         <div className="flex flex-wrap items-center gap-2">
           {!activeFolderId && (
@@ -678,6 +678,16 @@ export function WorkspaceReviewSection() {
               >
                 <div className="grid gap-3 sm:grid-cols-3">
                   <label className="block text-xs font-medium text-neutral-600">
+                    Kanji
+                    <input
+                      type="text"
+                      className={`${inputClass} ${jpFontClass}`}
+                      value={addKanji}
+                      onChange={(e) => setAddKanji(e.target.value)}
+                      placeholder="悪い"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-neutral-600">
                     Hiragana
                     <input
                       type="text"
@@ -695,16 +705,6 @@ export function WorkspaceReviewSection() {
                       value={addDefinition}
                       onChange={(e) => setAddDefinition(e.target.value)}
                       placeholder="bad, inferior"
-                    />
-                  </label>
-                  <label className="block text-xs font-medium text-neutral-600">
-                    Kanji
-                    <input
-                      type="text"
-                      className={`${inputClass} ${jpFontClass}`}
-                      value={addKanji}
-                      onChange={(e) => setAddKanji(e.target.value)}
-                      placeholder="悪い"
                     />
                   </label>
                 </div>
@@ -733,7 +733,7 @@ export function WorkspaceReviewSection() {
             </div>
           ) : items.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-pink-200/80 bg-white/90 px-6 py-14 text-center shadow-inner shadow-pink-100/30">
-              <p className="text-neutral-600">No cards yet. Add hiragana, English, and kanji above.</p>
+              <p className="text-neutral-600">No cards yet. Add kanji, hiragana, and English above.</p>
             </div>
           ) : (
             <>
@@ -760,11 +760,13 @@ export function WorkspaceReviewSection() {
                       onClick={() => setEditingItem(item)}
                       className={`min-w-0 flex-1 text-left ${jpFontClass}`}
                     >
-                      <p className="font-medium leading-snug text-neutral-900">
+                      <p className={`text-lg font-medium leading-snug text-neutral-900 ${jpFontClass}`}>
+                        {item.kanji}
+                      </p>
+                      <p className="mt-1 leading-snug text-neutral-600">
                         {item.kana}
                         <span className="text-neutral-500"> ({item.definition})</span>
                       </p>
-                      <p className="mt-1 text-lg leading-snug text-neutral-600">{item.kanji}</p>
                     </button>
                     {item.starred && (
                       <span className="text-amber-500" title="Starred" aria-label="Starred">
@@ -776,7 +778,7 @@ export function WorkspaceReviewSection() {
                       onClick={() => void deleteItem(item)}
                       className="shrink-0 rounded-lg p-2 text-rose-500 opacity-70 transition hover:bg-rose-50 hover:opacity-100 group-hover:opacity-100"
                       title="Delete"
-                      aria-label={`Delete ${item.kana}`}
+                      aria-label={`Delete ${item.kanji}`}
                     >
                       <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />

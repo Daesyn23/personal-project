@@ -40,10 +40,11 @@ export type ReviewFolderRow = {
 export type ReviewItemRow = {
   id: string;
   folder_id: string;
-  /** Hiragana reading */
+  /** Hiragana reading (flip card back) */
   kana: string;
-  /** English meaning */
+  /** English meaning (flip card back) */
   definition: string;
+  /** Kanji form (flip card front) */
   kanji: string;
   position: number;
   starred: boolean;

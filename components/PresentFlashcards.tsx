@@ -3,8 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelSpeechSynthesis } from "@/lib/japanese-tts";
 import type { FlashcardRow } from "@/lib/types";
+import { publishPresentationMode } from "@/lib/workspace-floating-panels";
 import { FlashcardSlide, type FlashcardSlideHandle } from "@/components/FlashcardSlide";
 import { InfoTip } from "@/components/InfoTip";
+import { PresentationCardZoomSlider } from "@/components/PresentationCardZoomSlider";
+import { usePresentationCardZoom } from "@/hooks/usePresentationCardZoom";
 import {
   hasDetailPhase,
   type PresentationPhase,
@@ -28,6 +31,7 @@ export function PresentFlashcards({
   const card = cards[index];
   const slideRef = useRef<FlashcardSlideHandle>(null);
   const [phase, setPhase] = useState<PresentationPhase>("word");
+  const { zoom, setCardZoom } = usePresentationCardZoom("workspace-flashcard-present-zoom-v1");
 
   useEffect(() => {
     if (open) setPhase("word");
@@ -39,6 +43,12 @@ export function PresentFlashcards({
 
   useEffect(() => {
     if (!open) cancelSpeechSynthesis();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    publishPresentationMode(true);
+    return () => publishPresentationMode(false);
   }, [open]);
 
   const advance = useCallback(() => {
@@ -146,13 +156,22 @@ export function PresentFlashcards({
         </span>
       </header>
 
-      <div className="flex flex-1 items-center justify-center overflow-auto p-4 sm:p-6">
-        <div
-          key={card.id}
-          className="flashcard-enter w-full max-w-3xl"
-        >
-          <FlashcardSlide ref={slideRef} card={card} phase={phase} />
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto p-4 sm:p-6">
+        <div className="w-full max-w-3xl">
+          <div
+            className="origin-center transition-[zoom] duration-150 ease-out motion-reduce:transition-none"
+            style={{ zoom }}
+          >
+            <div key={card.id} className="flashcard-enter">
+              <FlashcardSlide ref={slideRef} card={card} phase={phase} />
+            </div>
+          </div>
         </div>
+        <PresentationCardZoomSlider
+          zoom={zoom}
+          onChange={setCardZoom}
+          className="mt-4 w-full max-w-md shrink-0 sm:max-w-lg"
+        />
       </div>
     </div>
   );

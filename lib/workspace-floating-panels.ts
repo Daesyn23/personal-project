@@ -56,3 +56,21 @@ export function onFloatingPanelOpen(handler: (id: FloatingPanelId, open: boolean
   window.addEventListener(FLOATING_PANEL_OPEN_STATE, listener);
   return () => window.removeEventListener(FLOATING_PANEL_OPEN_STATE, listener);
 }
+
+export const PRESENTATION_MODE_STATE = "workspace-presentation-mode-state";
+
+export function publishPresentationMode(active: boolean) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent<{ active: boolean }>(PRESENTATION_MODE_STATE, { detail: { active } })
+  );
+}
+
+export function onPresentationMode(handler: (active: boolean) => void) {
+  const listener = (e: Event) => {
+    const active = (e as CustomEvent<{ active?: boolean }>).detail?.active;
+    if (typeof active === "boolean") handler(active);
+  };
+  window.addEventListener(PRESENTATION_MODE_STATE, listener);
+  return () => window.removeEventListener(PRESENTATION_MODE_STATE, listener);
+}

@@ -1,4 +1,4 @@
--- Review folders and flip-card items (hiragana + English front, kanji back)
+-- Review folders and flip-card items (kanji front, hiragana + English back)
 
 create table if not exists public.review_folders (
   id uuid primary key default gen_random_uuid(),

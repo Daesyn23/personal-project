@@ -4,12 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReviewItemRow } from "@/lib/types";
 import { cancelSpeechSynthesis } from "@/lib/japanese-tts";
 import { updateReviewItem } from "@/lib/review-repo";
+import { publishPresentationMode } from "@/lib/workspace-floating-panels";
 import {
   ReviewCardSlide,
   type ReviewCardPhase,
   type ReviewCardSlideHandle,
 } from "@/components/ReviewCardSlide";
+import { FloatingPanelResizeGrip } from "@/components/FloatingPanelResizeGrip";
+import { PresentationCardZoomSlider } from "@/components/PresentationCardZoomSlider";
 import { ReviewStarIcon } from "@/components/ReviewStarIcon";
+import { usePresentationCardZoom } from "@/hooks/usePresentationCardZoom";
+import { useReviewPresentCardSize } from "@/hooks/useReviewPresentCardSize";
 
 type Props = {
   items: ReviewItemRow[];
@@ -96,10 +101,12 @@ export function PresentReviewCards({
   const slideRef = useRef<ReviewCardSlideHandle>(null);
   const [phase, setPhase] = useState<ReviewCardPhase>("front");
   const [cardAnim, setCardAnim] = useState<CardAnim>("idle");
-  /** Locks flip to front while sliding between cards so the next kanji never flashes. */
+  /** Locks flip to front while sliding between cards so the next back face never flashes. */
   const [forceFront, setForceFront] = useState(false);
   const transitioningRef = useRef(false);
   const timersRef = useRef<number[]>([]);
+  const { zoom, setCardZoom } = usePresentationCardZoom("workspace-review-present-zoom-v1");
+  const { cardSize, onResizeHandlePointerDown } = useReviewPresentCardSize(open);
 
   const clearTimers = useCallback(() => {
     for (const id of timersRef.current) window.clearTimeout(id);
@@ -120,6 +127,12 @@ export function PresentReviewCards({
 
   useEffect(() => {
     if (!open) cancelSpeechSynthesis();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    publishPresentationMode(true);
+    return () => publishPresentationMode(false);
   }, [open]);
 
   useEffect(() => {
@@ -241,7 +254,7 @@ export function PresentReviewCards({
       aria-modal="true"
       aria-label="Review cards"
     >
-      <header className="relative flex items-center justify-center px-4 py-4 sm:py-5">
+      <header className="relative flex shrink-0 items-center justify-center px-4 py-4 sm:py-5">
         <button
           type="button"
           onClick={onClose}
@@ -276,37 +289,71 @@ export function PresentReviewCards({
         )}
       </header>
 
-      <div className="flex flex-1 items-center justify-center px-4 pb-4 sm:px-8">
-        <div className={`w-full max-w-lg will-change-transform ${animClass(cardAnim)}`}>
-          <ReviewCardSlide
-            ref={slideRef}
-            item={item}
-            phase={phase}
-            forceFront={forceFront}
-            onStarChange={(starred) => void handleStarChange(starred)}
-          />
+      <div className="min-h-0 flex-1 overflow-auto px-4 py-2 sm:px-8 sm:py-4">
+        <div className="flex min-h-full w-full items-center justify-center">
+          <div
+            className="relative mx-auto shrink-0 overflow-auto rounded-3xl bg-white shadow-lg shadow-slate-200/80 ring-1 ring-slate-100"
+            style={{ width: cardSize.w, height: cardSize.h, maxWidth: "calc(100vw - 2rem)", maxHeight: "calc(100vh - 9.25rem)" }}
+          >
+            <div
+              className="h-full w-full origin-center transition-[zoom] duration-150 ease-out motion-reduce:transition-none"
+              style={{ zoom }}
+            >
+              <div className={`h-full w-full will-change-transform ${animClass(cardAnim)}`}>
+                <ReviewCardSlide
+                  ref={slideRef}
+                  item={item}
+                  phase={phase}
+                  forceFront={forceFront}
+                  presentationZoom={zoom}
+                  onStarChange={(starred) => void handleStarChange(starred)}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onPointerDown={onResizeHandlePointerDown}
+              className="absolute bottom-0 right-0 z-20 flex h-10 w-10 touch-none cursor-nwse-resize items-center justify-center rounded-tl-xl rounded-br-3xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pink-300"
+              aria-label="Resize card"
+              title="Drag corner to resize (up to screen edge)"
+            >
+              <FloatingPanelResizeGrip className="h-4 w-4 rotate-180" />
+            </button>
+          </div>
         </div>
       </div>
 
-      <footer className="flex items-center justify-between px-6 pb-8 pt-2 sm:px-10 sm:pb-10">
-        <button
-          type="button"
-          onClick={back}
-          disabled={!canGoBack || isTransitioning}
-          className="rounded-full p-3 text-slate-400 transition hover:bg-slate-200/60 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent"
-          aria-label="Previous"
-        >
-          <BackArrowIcon className="h-8 w-8" />
-        </button>
-        <button
-          type="button"
-          onClick={advance}
-          disabled={isTransitioning || (phase === "back" && index >= items.length - 1)}
-          className="rounded-full bg-gradient-to-r from-pink-500 to-rose-500 p-3 text-white shadow-md shadow-pink-300/40 transition hover:from-pink-600 hover:to-rose-600 disabled:opacity-30"
-          aria-label={phase === "front" ? "Show kanji" : "Next card"}
-        >
-          <ForwardArrowIcon className="h-8 w-8" />
-        </button>
+      <footer className="shrink-0 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-10 sm:pb-10">
+        <div className="relative flex h-14 items-center justify-between sm:h-16">
+          <button
+            type="button"
+            onClick={back}
+            disabled={!canGoBack || isTransitioning}
+            className="z-10 shrink-0 rounded-full p-3 text-slate-400 transition hover:bg-slate-200/60 hover:text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent"
+            aria-label="Previous"
+          >
+            <BackArrowIcon className="h-8 w-8" />
+          </button>
+          <button
+            type="button"
+            onClick={advance}
+            disabled={isTransitioning || (phase === "back" && index >= items.length - 1)}
+            className="z-10 shrink-0 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 p-3 text-white shadow-md shadow-pink-300/40 transition hover:from-pink-600 hover:to-rose-600 disabled:opacity-30"
+            aria-label={phase === "front" ? "Show reading and meaning" : "Next card"}
+          >
+            <ForwardArrowIcon className="h-8 w-8" />
+          </button>
+          <div
+            className="pointer-events-none absolute left-1/2 top-1/2 w-full max-w-[calc(100vw-7rem)] -translate-x-1/2 -translate-y-1/2 px-14 sm:max-w-[calc(100vw-10rem)] sm:px-20"
+            style={{ maxWidth: cardSize.w }}
+          >
+            <PresentationCardZoomSlider
+              zoom={zoom}
+              onChange={setCardZoom}
+              className="pointer-events-auto w-full min-w-0"
+            />
+          </div>
+        </div>
       </footer>
     </div>
   );
