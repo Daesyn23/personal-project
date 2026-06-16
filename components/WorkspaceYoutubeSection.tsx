@@ -10,6 +10,8 @@ import {
   type JlptPlaylistDef,
   type JlptPlaylistKey,
 } from "@/lib/youtube-jlpt-playlists";
+import { matchesLessonNumber } from "@/lib/lesson-number";
+import type { WorkspaceNavigateDetail } from "@/lib/workspace-nav";
 import type { YoutubePlaylistVideo } from "@/lib/parse-youtube-playlist-rss";
 import {
   loadLocalLessonNotes,
@@ -442,7 +444,12 @@ function VideoGridSkeleton() {
   );
 }
 
-export function WorkspaceYoutubeSection() {
+export function WorkspaceYoutubeSection(props: {
+  pendingNav?: WorkspaceNavigateDetail | null;
+  onNavConsumed?: () => void;
+}) {
+  const { pendingNav, onNavConsumed } = props;
+  const pendingYoutubeRef = useRef<WorkspaceNavigateDetail["youtube"]>(null);
   const [folder, setFolder] = useState<JlptPlaylistKey | null>(null);
   const [data, setData] = useState<FetchState>({ status: "idle" });
   const [searchQuery, setSearchQuery] = useState("");
@@ -473,6 +480,28 @@ export function WorkspaceYoutubeSection() {
   const playerAnchorRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const skipScrollToGridRef = useRef(true);
+
+  useEffect(() => {
+    if (pendingNav?.area !== "youtube" || !pendingNav.youtube) return;
+    pendingYoutubeRef.current = pendingNav.youtube;
+    setFolder(pendingNav.youtube.jlptKey);
+    onNavConsumed?.();
+  }, [pendingNav, onNavConsumed]);
+
+  useEffect(() => {
+    const y = pendingYoutubeRef.current;
+    if (!y || data.status !== "ok") return;
+    const lessonVideos = y.lessonNumber
+      ? data.videos.filter((v) => matchesLessonNumber(v.title, y.lessonNumber!))
+      : data.videos;
+    const pick = y.videoId ?? lessonVideos[0]?.videoId;
+    if (!pick) return;
+    setSelectedVideoId(pick);
+    pendingYoutubeRef.current = null;
+    requestAnimationFrame(() => {
+      playerAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [data]);
 
   useEffect(() => {
     sessionStorage.setItem(STORAGE_SORT, sortOrder);

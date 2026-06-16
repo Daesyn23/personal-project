@@ -93,45 +93,46 @@ export function AddCardForm({ setId, onAdded, defaultExpanded = false }: Props) 
       className="overflow-hidden rounded-2xl border border-pink-100/90 bg-white shadow-md shadow-pink-100/40 ring-1 ring-pink-50"
       aria-label="Add a card"
     >
-      <button
-        type="button"
-        id="add-card-toggle"
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-pink-50/40 sm:px-5"
-      >
-        <span
-          className="flex min-w-0 items-center"
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
+      <div className="flex w-full items-center justify-between gap-3 px-4 py-3.5 sm:px-5">
+        <HeadingWithInfo
+          className="min-w-0 flex-1"
+          align="center"
+          placement="above-start"
+          infoLabel="Add a card"
+          heading={
+            <button
+              type="button"
+              id="add-card-toggle"
+              aria-expanded={open}
+              aria-controls={panelId}
+              onClick={() => setOpen((v) => !v)}
+              className="text-left text-sm font-semibold tracking-tight text-neutral-900 transition hover:text-pink-800 sm:text-base"
+            >
+              Add a card
+            </button>
+          }
         >
-          <HeadingWithInfo
-            align="center"
-            placement="above-start"
-            infoLabel="Add a card"
-            heading={
-              <h3 className="text-sm font-semibold tracking-tight text-neutral-900 sm:text-base">Add a card</h3>
-            }
-          >
-            {open ? (
-              <p>Slide 1: romaji · kana · group · Slide 2: gloss, context, examples. English and/or kana required.</p>
-            ) : (
-              <p>Expand to type a new card — English and/or kana required.</p>
-            )}
-          </HeadingWithInfo>
-        </span>
-        <span
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-pink-50 text-pink-600 transition-transform duration-200 ${
+          {open ? (
+            <p>Slide 1: romaji · kana · group · Slide 2: gloss, context, examples. English and/or kana required.</p>
+          ) : (
+            <p>Expand to type a new card — English and/or kana required.</p>
+          )}
+        </HeadingWithInfo>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          aria-label={open ? "Collapse add card form" : "Expand add card form"}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-pink-50 text-pink-600 transition-transform duration-200 hover:bg-pink-100 ${
             open ? "rotate-180" : ""
           }`}
-          aria-hidden
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-        </span>
-      </button>
+        </button>
+      </div>
 
       <div
         className={`grid transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none ${

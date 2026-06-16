@@ -189,3 +189,35 @@ export async function saveLessonNotes(
   const synced = await pushRemoteLessonNotes(id, entry);
   return { synced };
 }
+
+export type LessonNoteRecord = SavedLessonNotes & { videoId: string };
+
+/** All saved teaching write-ups (local cache merged with Supabase). */
+export async function listAllLessonNotes(): Promise<LessonNoteRecord[]> {
+  const merged = new Map<string, LessonNoteRecord>();
+
+  for (const [videoId, entry] of Object.entries(readAllLocal())) {
+    merged.set(videoId, { ...entry, videoId });
+  }
+
+  const supabase = getSupabaseBrowserClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("youtube_lesson_notes")
+      .select("video_id, video_title, notes, transcript_language, generated_at, updated_at");
+    if (error) {
+      console.error("[youtube-lesson-notes] list", error);
+    } else {
+      for (const row of data ?? []) {
+        const videoId = (row as RemoteRow).video_id;
+        const entry = rowToEntry(row as RemoteRow);
+        const existing = merged.get(videoId);
+        if (!existing || entryMs(entry) >= entryMs(existing)) {
+          merged.set(videoId, { ...entry, videoId });
+        }
+      }
+    }
+  }
+
+  return [...merged.values()].sort((a, b) => entryMs(b) - entryMs(a));
+}

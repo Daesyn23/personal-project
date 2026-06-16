@@ -17,6 +17,7 @@ import { HeadingWithInfo } from "@/components/InfoTip";
 import { WorkspaceLessonFolderCard } from "@/components/WorkspaceLessonFolderCard";
 import { WorkspaceLevelCollectionCard } from "@/components/WorkspaceLevelCollectionCard";
 import type { WorkspaceFileRow, WorkspaceFolderRow } from "@/lib/types";
+import type { WorkspaceNavigateDetail } from "@/lib/workspace-nav";
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
@@ -94,7 +95,11 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return (el as HTMLElement).isContentEditable;
 }
 
-export function WorkspaceDocumentsSection() {
+export function WorkspaceDocumentsSection(props: {
+  pendingNav?: WorkspaceNavigateDetail | null;
+  onNavConsumed?: () => void;
+}) {
+  const { pendingNav, onNavConsumed } = props;
   const [trail, setTrail] = useState<{ id: string; name: string }[]>([]);
   const folderId = trail.length ? trail[trail.length - 1].id : null;
 
@@ -131,6 +136,12 @@ export function WorkspaceDocumentsSection() {
     setLoading(true);
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    if (pendingNav?.area !== "documents" || !pendingNav.documentsTrail?.length) return;
+    setTrail(pendingNav.documentsTrail);
+    onNavConsumed?.();
+  }, [pendingNav, onNavConsumed]);
 
   const parentId = folderId;
 

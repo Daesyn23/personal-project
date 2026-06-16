@@ -16,6 +16,7 @@ import { WorkspaceTimerSection } from "@/components/WorkspaceTimerSection";
 import { WorkspaceJapaneseGrammarSection } from "@/components/WorkspaceJapaneseGrammarSection";
 import { WorkspaceJapanesePracticeSection } from "@/components/WorkspaceJapanesePracticeSection";
 import { WorkspaceReviewSection } from "@/components/WorkspaceReviewSection";
+import { WorkspaceLessonDashboard } from "@/components/WorkspaceLessonDashboard";
 import { WorkspaceLessonPlanSection } from "@/components/WorkspaceLessonPlanSection";
 import { WorkspaceTranslationSection } from "@/components/WorkspaceTranslationSection";
 import { WorkspaceYoutubeSection } from "@/components/WorkspaceYoutubeSection";
@@ -29,7 +30,7 @@ import {
   usingLocalStorage,
 } from "@/lib/flashcards-repo";
 import type { CardSetRow, FlashcardRow } from "@/lib/types";
-import { onWorkspaceNavigate } from "@/lib/workspace-nav";
+import { onWorkspaceNavigate, type WorkspaceNavigateDetail } from "@/lib/workspace-nav";
 
 function tileLabel(card: FlashcardRow): string {
   return (
@@ -43,6 +44,7 @@ function tileLabel(card: FlashcardRow): string {
 }
 
 type WorkspaceArea =
+  | "dashboard"
   | "documents"
   | "flashcards"
   | "review"
@@ -56,6 +58,7 @@ type WorkspaceArea =
   | "lessonPlan";
 
 const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
+  { id: "dashboard", label: "Dashboard" },
   { id: "documents", label: "Documents" },
   { id: "flashcards", label: "Flashcards" },
   { id: "review", label: "Review" },
@@ -70,7 +73,8 @@ const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
 ];
 
 export default function HomePage() {
-  const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>("flashcards");
+  const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>("dashboard");
+  const [pendingNav, setPendingNav] = useState<WorkspaceNavigateDetail | null>(null);
   const [sets, setSets] = useState<CardSetRow[]>([]);
   const [activeSetId, setActiveSetId] = useState<string | null>(null);
   const [cards, setCards] = useState<FlashcardRow[]>([]);
@@ -107,9 +111,13 @@ export default function HomePage() {
   }, [refresh]);
 
   useEffect(() => {
-    return onWorkspaceNavigate((area) => {
-      setWorkspaceArea(area);
-      if (area === "translate") {
+    return onWorkspaceNavigate((detail) => {
+      setWorkspaceArea(detail.area);
+      if (detail.flashcardSetId) {
+        setActiveSetId(detail.flashcardSetId);
+      }
+      setPendingNav(detail);
+      if (detail.area === "translate") {
         requestAnimationFrame(() => {
           document.getElementById("workspace-area-translate")?.scrollIntoView({
             behavior: "smooth",
@@ -122,6 +130,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (
+      workspaceArea === "dashboard" ||
       workspaceArea === "documents" ||
       workspaceArea === "googleSheet" ||
       workspaceArea === "timer" ||
@@ -353,8 +362,17 @@ export default function HomePage() {
           </div>
         </header>
 
-        {workspaceArea === "documents" ? (
-          <WorkspaceDocumentsSection />
+        {workspaceArea === "dashboard" ? (
+          <WorkspaceLessonDashboard
+            onOpenFlashcardSet={(setId) => {
+              setActiveSetId(setId);
+            }}
+          />
+        ) : workspaceArea === "documents" ? (
+          <WorkspaceDocumentsSection
+            pendingNav={pendingNav}
+            onNavConsumed={() => setPendingNav(null)}
+          />
         ) : workspaceArea === "googleSheet" ? (
           <WorkspaceGoogleSheetSection />
         ) : workspaceArea === "timer" ? (
@@ -370,7 +388,10 @@ export default function HomePage() {
         ) : workspaceArea === "review" ? (
           <WorkspaceReviewSection />
         ) : workspaceArea === "youtube" ? (
-          <WorkspaceYoutubeSection />
+          <WorkspaceYoutubeSection
+            pendingNav={pendingNav}
+            onNavConsumed={() => setPendingNav(null)}
+          />
         ) : workspaceArea === "lessonPlan" ? (
           <WorkspaceLessonPlanSection activeSetId={activeSetId} setTitle={activeSetName ?? null} />
         ) : workspaceArea === "audioLesson" ? (
