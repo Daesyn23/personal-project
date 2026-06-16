@@ -1,6 +1,7 @@
 "use client";
 
 import { HeadingWithInfo } from "@/components/InfoTip";
+import { LessonNotesMarkdown } from "@/components/LessonNotesMarkdown";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   JLPT_YOUTUBE_PLAYLISTS,
@@ -27,6 +28,30 @@ const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
 
 const STORAGE_SORT = "video-lessons-sort";
 const STORAGE_PAGE_SIZE = "video-lessons-page-size";
+const STORAGE_LESSON_NOTES = "video-lessons-notes-cache-v1";
+
+type CachedLessonNotes = {
+  notes: string;
+  videoTitle: string;
+  transcriptLanguage: string;
+  generatedAt: string;
+};
+
+function readNotesCache(): Record<string, CachedLessonNotes> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = sessionStorage.getItem(STORAGE_LESSON_NOTES);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, CachedLessonNotes>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeNotesCache(cache: Record<string, CachedLessonNotes>) {
+  sessionStorage.setItem(STORAGE_LESSON_NOTES, JSON.stringify(cache));
+}
 
 function readStoredSort(): SortOption | null {
   if (typeof window === "undefined") return null;
@@ -443,6 +468,17 @@ export function WorkspaceYoutubeSection() {
   const [pageSize, setPageSize] = useState<number>(() => readStoredPageSize() ?? 24);
   const [sortOrder, setSortOrder] = useState<SortOption>(() => readStoredSort() ?? "playlist");
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [aiReady, setAiReady] = useState<boolean | null>(null);
+  const [lessonNotes, setLessonNotes] = useState<string | null>(null);
+  const [lessonNotesMeta, setLessonNotesMeta] = useState<{
+    transcriptLanguage: string;
+    generatedAt: string;
+    cached: boolean;
+  } | null>(null);
+  const [lessonNotesLoading, setLessonNotesLoading] = useState(false);
+  const [lessonNotesError, setLessonNotesError] = useState<string | null>(null);
+  const [notesCopyHint, setNotesCopyHint] = useState<string | null>(null);
+  const [notesExpanded, setNotesExpanded] = useState(true);
 
   const gridAnchorRef = useRef<HTMLDivElement>(null);
   const playerAnchorRef = useRef<HTMLDivElement>(null);
@@ -456,6 +492,22 @@ export function WorkspaceYoutubeSection() {
   useEffect(() => {
     sessionStorage.setItem(STORAGE_PAGE_SIZE, String(pageSize));
   }, [pageSize]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/gemini/status");
+        const data = (await res.json()) as { configured?: boolean };
+        if (!cancelled) setAiReady(Boolean(data.configured));
+      } catch {
+        if (!cancelled) setAiReady(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async (def: JlptPlaylistDef) => {
     setData({ status: "loading" });
@@ -584,6 +636,89 @@ export function WorkspaceYoutubeSection() {
   }, [selectedVideoId]);
 
   useEffect(() => {
+    setLessonNotesError(null);
+    setNotesCopyHint(null);
+    if (!selectedVideoId) {
+      setLessonNotes(null);
+      setLessonNotesMeta(null);
+      return;
+    }
+    const cache = readNotesCache();
+    const hit = cache[selectedVideoId];
+    if (hit?.notes) {
+      setLessonNotes(hit.notes);
+      setLessonNotesMeta({
+        transcriptLanguage: hit.transcriptLanguage,
+        generatedAt: hit.generatedAt,
+        cached: true,
+      });
+      setNotesExpanded(true);
+    } else {
+      setLessonNotes(null);
+      setLessonNotesMeta(null);
+    }
+  }, [selectedVideoId]);
+
+  const generateLessonNotes = useCallback(async () => {
+    if (!selectedVideoId || !selectedVideo) return;
+    setLessonNotesLoading(true);
+    setLessonNotesError(null);
+    setNotesCopyHint(null);
+    try {
+      const res = await fetch("/api/youtube/extract-lesson", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoId: selectedVideoId,
+          title: selectedVideo.title,
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        notes?: string;
+        transcriptLanguage?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+      const notes = typeof data.notes === "string" ? data.notes.trim() : "";
+      if (!notes) {
+        throw new Error("No lesson notes returned.");
+      }
+      const generatedAt = new Date().toISOString();
+      const transcriptLanguage =
+        typeof data.transcriptLanguage === "string" ? data.transcriptLanguage : "unknown";
+      const cache = readNotesCache();
+      cache[selectedVideoId] = {
+        notes,
+        videoTitle: selectedVideo.title,
+        transcriptLanguage,
+        generatedAt,
+      };
+      writeNotesCache(cache);
+      setLessonNotes(notes);
+      setLessonNotesMeta({ transcriptLanguage, generatedAt, cached: false });
+      setNotesExpanded(true);
+    } catch (e) {
+      setLessonNotesError(e instanceof Error ? e.message : "Could not generate lesson notes.");
+    } finally {
+      setLessonNotesLoading(false);
+    }
+  }, [selectedVideoId, selectedVideo]);
+
+  const copyLessonNotes = useCallback(async () => {
+    if (!lessonNotes) return;
+    try {
+      await navigator.clipboard.writeText(lessonNotes);
+      setNotesCopyHint("Lesson notes copied");
+      window.setTimeout(() => setNotesCopyHint(null), 2200);
+    } catch {
+      setNotesCopyHint("Could not copy notes");
+      window.setTimeout(() => setNotesCopyHint(null), 2800);
+    }
+  }, [lessonNotes]);
+
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
       const el = e.target as HTMLElement;
@@ -629,7 +764,10 @@ export function WorkspaceYoutubeSection() {
                 you open a folder, use sort and search to find lessons quickly.
               </p>
             ) : (
-              <p>Switch folders, sort or search lessons, and page through long playlists with the controls below.</p>
+              <p>
+                Switch folders, sort or search lessons, and use <strong className="font-medium text-neutral-800">Generate lesson notes</strong>{" "}
+                on any video to pull a full teaching write-up from the captions (grammar, examples, flow, and Taglish prep notes).
+              </p>
             )}
           </HeadingWithInfo>
 
@@ -724,6 +862,35 @@ export function WorkspaceYoutubeSection() {
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <button
                       type="button"
+                      onClick={() => void generateLessonNotes()}
+                      disabled={lessonNotesLoading || aiReady !== true}
+                      title={
+                        aiReady !== true
+                          ? "Add GEMINI_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY to generate lesson notes"
+                          : lessonNotes
+                            ? "Regenerate a full teaching write-up from this video"
+                            : "Extract a full teaching write-up from this video"
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-full border border-violet-300 bg-gradient-to-r from-violet-600 to-purple-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm shadow-violet-300/40 transition hover:brightness-[1.05] disabled:pointer-events-none disabled:opacity-45"
+                    >
+                      {lessonNotesLoading ? (
+                        <span
+                          className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                          aria-hidden
+                        />
+                      ) : (
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      )}
+                      {lessonNotesLoading
+                        ? "Generating…"
+                        : lessonNotes
+                          ? "Regenerate lesson notes"
+                          : "Generate lesson notes"}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => void copyWatchLink()}
                       className="inline-flex items-center gap-1.5 rounded-full border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
                     >
@@ -738,6 +905,57 @@ export function WorkspaceYoutubeSection() {
                   <p className="mx-auto max-w-4xl text-center text-xs font-medium text-pink-700" role="status">
                     {copyHint}
                   </p>
+                ) : null}
+                {lessonNotesError ? (
+                  <p
+                    className="mx-auto max-w-4xl rounded-xl border border-rose-200 bg-rose-50/90 px-4 py-3 text-sm text-rose-900"
+                    role="alert"
+                  >
+                    {lessonNotesError}
+                  </p>
+                ) : null}
+                {lessonNotes ? (
+                  <div className="mx-auto max-w-4xl overflow-hidden rounded-2xl border border-violet-200/80 bg-gradient-to-b from-white to-violet-50/30 shadow-md ring-1 ring-violet-100/70">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-100/90 bg-violet-50/50 px-4 py-3 sm:px-5">
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold uppercase tracking-[0.14em] text-violet-700">Teaching write-up</p>
+                        {lessonNotesMeta ? (
+                          <p className="mt-0.5 text-[11px] text-neutral-500">
+                            {lessonNotesMeta.cached ? "Loaded from this session" : "Just generated"}
+                            {lessonNotesMeta.transcriptLanguage
+                              ? ` · Captions: ${lessonNotesMeta.transcriptLanguage}`
+                              : null}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setNotesExpanded((v) => !v)}
+                          className="rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm transition hover:bg-violet-50"
+                        >
+                          {notesExpanded ? "Collapse" : "Expand"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void copyLessonNotes()}
+                          className="rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm transition hover:bg-violet-50"
+                        >
+                          Copy notes
+                        </button>
+                      </div>
+                    </div>
+                    {notesExpanded ? (
+                      <div className="max-h-[min(70vh,42rem)] overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
+                        <LessonNotesMarkdown markdown={lessonNotes} />
+                      </div>
+                    ) : null}
+                    {notesCopyHint ? (
+                      <p className="border-t border-violet-100/80 px-4 py-2 text-center text-xs font-medium text-violet-700" role="status">
+                        {notesCopyHint}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             )}
