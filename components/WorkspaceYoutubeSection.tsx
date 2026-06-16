@@ -9,6 +9,11 @@ import {
   type JlptPlaylistKey,
 } from "@/lib/youtube-jlpt-playlists";
 import type { YoutubePlaylistVideo } from "@/lib/parse-youtube-playlist-rss";
+import {
+  loadLocalLessonNotes,
+  loadSavedLessonNotes,
+  saveLessonNotes,
+} from "@/lib/youtube-lesson-notes-repo";
 
 type FetchState =
   | { status: "idle" }
@@ -28,30 +33,6 @@ const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
 
 const STORAGE_SORT = "video-lessons-sort";
 const STORAGE_PAGE_SIZE = "video-lessons-page-size";
-const STORAGE_LESSON_NOTES = "video-lessons-notes-cache-v1";
-
-type CachedLessonNotes = {
-  notes: string;
-  videoTitle: string;
-  transcriptLanguage: string;
-  generatedAt: string;
-};
-
-function readNotesCache(): Record<string, CachedLessonNotes> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = sessionStorage.getItem(STORAGE_LESSON_NOTES);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, CachedLessonNotes>;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeNotesCache(cache: Record<string, CachedLessonNotes>) {
-  sessionStorage.setItem(STORAGE_LESSON_NOTES, JSON.stringify(cache));
-}
 
 function readStoredSort(): SortOption | null {
   if (typeof window === "undefined") return null;
@@ -473,7 +454,8 @@ export function WorkspaceYoutubeSection() {
   const [lessonNotesMeta, setLessonNotesMeta] = useState<{
     transcriptLanguage: string;
     generatedAt: string;
-    cached: boolean;
+    saved: boolean;
+    synced: boolean;
   } | null>(null);
   const [lessonNotesLoading, setLessonNotesLoading] = useState(false);
   const [lessonNotesError, setLessonNotesError] = useState<string | null>(null);
@@ -643,20 +625,43 @@ export function WorkspaceYoutubeSection() {
       setLessonNotesMeta(null);
       return;
     }
-    const cache = readNotesCache();
-    const hit = cache[selectedVideoId];
-    if (hit?.notes) {
-      setLessonNotes(hit.notes);
+
+    const local = loadLocalLessonNotes(selectedVideoId);
+    if (local?.notes) {
+      setLessonNotes(local.notes);
       setLessonNotesMeta({
-        transcriptLanguage: hit.transcriptLanguage,
-        generatedAt: hit.generatedAt,
-        cached: true,
+        transcriptLanguage: local.transcriptLanguage,
+        generatedAt: local.generatedAt,
+        saved: true,
+        synced: false,
       });
       setNotesExpanded(true);
     } else {
       setLessonNotes(null);
       setLessonNotesMeta(null);
     }
+
+    let cancelled = false;
+    void loadSavedLessonNotes(selectedVideoId).then((result) => {
+      if (cancelled) return;
+      if (result?.entry.notes) {
+        setLessonNotes(result.entry.notes);
+        setLessonNotesMeta({
+          transcriptLanguage: result.entry.transcriptLanguage,
+          generatedAt: result.entry.generatedAt,
+          saved: true,
+          synced: result.synced,
+        });
+        setNotesExpanded(true);
+      } else if (!local?.notes) {
+        setLessonNotes(null);
+        setLessonNotesMeta(null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedVideoId]);
 
   const generateLessonNotes = useCallback(async () => {
@@ -688,16 +693,14 @@ export function WorkspaceYoutubeSection() {
       const generatedAt = new Date().toISOString();
       const transcriptLanguage =
         typeof data.transcriptLanguage === "string" ? data.transcriptLanguage : "unknown";
-      const cache = readNotesCache();
-      cache[selectedVideoId] = {
+      const { synced } = await saveLessonNotes(selectedVideoId, {
         notes,
         videoTitle: selectedVideo.title,
         transcriptLanguage,
         generatedAt,
-      };
-      writeNotesCache(cache);
+      });
       setLessonNotes(notes);
-      setLessonNotesMeta({ transcriptLanguage, generatedAt, cached: false });
+      setLessonNotesMeta({ transcriptLanguage, generatedAt, saved: true, synced });
       setNotesExpanded(true);
     } catch (e) {
       setLessonNotesError(e instanceof Error ? e.message : "Could not generate lesson notes.");
@@ -921,7 +924,9 @@ export function WorkspaceYoutubeSection() {
                         <p className="text-xs font-bold uppercase tracking-[0.14em] text-violet-700">Teaching write-up</p>
                         {lessonNotesMeta ? (
                           <p className="mt-0.5 text-[11px] text-neutral-500">
-                            {lessonNotesMeta.cached ? "Loaded from this session" : "Just generated"}
+                            {lessonNotesMeta.saved
+                              ? `Saved · ${new Date(lessonNotesMeta.generatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}${lessonNotesMeta.synced ? " · Synced across devices" : " · This device only"}`
+                              : "Just generated"}
                             {lessonNotesMeta.transcriptLanguage
                               ? ` · Captions: ${lessonNotesMeta.transcriptLanguage}`
                               : null}
