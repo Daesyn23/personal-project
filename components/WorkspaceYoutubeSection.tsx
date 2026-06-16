@@ -1,6 +1,8 @@
 "use client";
 
 import { HeadingWithInfo } from "@/components/InfoTip";
+import { LessonNotesEditor } from "@/components/LessonNotesEditor";
+import { LessonNotesFullscreen } from "@/components/LessonNotesFullscreen";
 import { LessonNotesMarkdown } from "@/components/LessonNotesMarkdown";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -461,6 +463,11 @@ export function WorkspaceYoutubeSection() {
   const [lessonNotesError, setLessonNotesError] = useState<string | null>(null);
   const [notesCopyHint, setNotesCopyHint] = useState<string | null>(null);
   const [notesExpanded, setNotesExpanded] = useState(true);
+  const [notesEditorOpen, setNotesEditorOpen] = useState(false);
+  const [notesFullscreen, setNotesFullscreen] = useState(false);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [notesSaveError, setNotesSaveError] = useState<string | null>(null);
 
   const gridAnchorRef = useRef<HTMLDivElement>(null);
   const playerAnchorRef = useRef<HTMLDivElement>(null);
@@ -620,6 +627,10 @@ export function WorkspaceYoutubeSection() {
   useEffect(() => {
     setLessonNotesError(null);
     setNotesCopyHint(null);
+    setNotesEditorOpen(false);
+    setNotesFullscreen(false);
+    setNotesDraft("");
+    setNotesSaveError(null);
     if (!selectedVideoId) {
       setLessonNotes(null);
       setLessonNotesMeta(null);
@@ -708,6 +719,62 @@ export function WorkspaceYoutubeSection() {
       setLessonNotesLoading(false);
     }
   }, [selectedVideoId, selectedVideo]);
+
+  const openNotesEditor = useCallback(() => {
+    setNotesDraft(lessonNotes ?? "");
+    setNotesSaveError(null);
+    setNotesFullscreen(false);
+    setNotesEditorOpen(true);
+  }, [lessonNotes]);
+
+  const lessonNotesMetaLine = useMemo(() => {
+    if (!lessonNotesMeta) return null;
+    const parts: string[] = [];
+    if (lessonNotesMeta.saved) {
+      parts.push(
+        `Saved · ${new Date(lessonNotesMeta.generatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`
+      );
+      if (lessonNotesMeta.synced) parts.push("Synced across devices");
+      else parts.push("This device only");
+    }
+    if (lessonNotesMeta.transcriptLanguage) {
+      parts.push(
+        lessonNotesMeta.transcriptLanguage === "manual"
+          ? "Added manually"
+          : `Captions: ${lessonNotesMeta.transcriptLanguage}`
+      );
+    }
+    return parts.join(" · ");
+  }, [lessonNotesMeta]);
+
+  const saveManualLessonNotes = useCallback(async () => {
+    if (!selectedVideoId || !selectedVideo) return;
+    const text = notesDraft.trim();
+    if (!text) {
+      setNotesSaveError("Enter some notes before saving.");
+      return;
+    }
+    setNotesSaving(true);
+    setNotesSaveError(null);
+    try {
+      const generatedAt = new Date().toISOString();
+      const { synced } = await saveLessonNotes(selectedVideoId, {
+        notes: text,
+        videoTitle: selectedVideo.title,
+        transcriptLanguage: "manual",
+        generatedAt,
+      });
+      setLessonNotes(text);
+      setLessonNotesMeta({ transcriptLanguage: "manual", generatedAt, saved: true, synced });
+      setNotesExpanded(true);
+      setNotesEditorOpen(false);
+      setLessonNotesError(null);
+    } catch (e) {
+      setNotesSaveError(e instanceof Error ? e.message : "Could not save notes.");
+    } finally {
+      setNotesSaving(false);
+    }
+  }, [selectedVideoId, selectedVideo, notesDraft]);
 
   const copyLessonNotes = useCallback(async () => {
     if (!lessonNotes) return;
@@ -894,6 +961,16 @@ export function WorkspaceYoutubeSection() {
                     </button>
                     <button
                       type="button"
+                      onClick={openNotesEditor}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-pink-300 bg-white px-3.5 py-1.5 text-xs font-bold text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+                    >
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      {lessonNotes ? "Edit notes" : "Add notes"}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => void copyWatchLink()}
                       className="inline-flex items-center gap-1.5 rounded-full border border-pink-200 bg-white px-3 py-1.5 text-xs font-semibold text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
                     >
@@ -914,9 +991,28 @@ export function WorkspaceYoutubeSection() {
                     className="mx-auto max-w-4xl rounded-xl border border-rose-200 bg-rose-50/90 px-4 py-3 text-sm text-rose-900"
                     role="alert"
                   >
-                    {lessonNotesError}
+                    {lessonNotesError}{" "}
+                    <button
+                      type="button"
+                      onClick={openNotesEditor}
+                      className="font-semibold text-rose-950 underline decoration-rose-400/80 underline-offset-2 hover:text-rose-800"
+                    >
+                      Add notes manually
+                    </button>
                   </p>
                 ) : null}
+                <LessonNotesEditor
+                  open={notesEditorOpen}
+                  initialValue={notesDraft}
+                  saving={notesSaving}
+                  error={notesSaveError}
+                  onChange={setNotesDraft}
+                  onSave={() => void saveManualLessonNotes()}
+                  onCancel={() => {
+                    setNotesEditorOpen(false);
+                    setNotesSaveError(null);
+                  }}
+                />
                 {lessonNotes ? (
                   <div className="mx-auto max-w-4xl overflow-hidden rounded-2xl border border-violet-200/80 bg-gradient-to-b from-white to-violet-50/30 shadow-md ring-1 ring-violet-100/70">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-100/90 bg-violet-50/50 px-4 py-3 sm:px-5">
@@ -928,7 +1024,7 @@ export function WorkspaceYoutubeSection() {
                               ? `Saved · ${new Date(lessonNotesMeta.generatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}${lessonNotesMeta.synced ? " · Synced across devices" : " · This device only"}`
                               : "Just generated"}
                             {lessonNotesMeta.transcriptLanguage
-                              ? ` · Captions: ${lessonNotesMeta.transcriptLanguage}`
+                              ? ` · ${lessonNotesMeta.transcriptLanguage === "manual" ? "Added manually" : `Captions: ${lessonNotesMeta.transcriptLanguage}`}`
                               : null}
                           </p>
                         ) : null}
@@ -936,10 +1032,28 @@ export function WorkspaceYoutubeSection() {
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
+                          onClick={() => setNotesFullscreen(true)}
+                          className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm transition hover:bg-violet-50"
+                          title="Open teaching write-up fullscreen"
+                        >
+                          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                          </svg>
+                          Fullscreen
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => setNotesExpanded((v) => !v)}
                           className="rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm transition hover:bg-violet-50"
                         >
                           {notesExpanded ? "Collapse" : "Expand"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={openNotesEditor}
+                          className="rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm transition hover:bg-violet-50"
+                        >
+                          Edit
                         </button>
                         <button
                           type="button"
@@ -962,6 +1076,15 @@ export function WorkspaceYoutubeSection() {
                     ) : null}
                   </div>
                 ) : null}
+                <LessonNotesFullscreen
+                  open={notesFullscreen && Boolean(lessonNotes)}
+                  videoTitle={selectedVideo?.title ?? "Video lesson"}
+                  markdown={lessonNotes ?? ""}
+                  metaLine={lessonNotesMetaLine}
+                  onClose={() => setNotesFullscreen(false)}
+                  onCopy={() => void copyLessonNotes()}
+                  onEdit={openNotesEditor}
+                />
               </div>
             )}
 

@@ -24,9 +24,16 @@ function pickLanguage(
   return typeof first === "string" ? first : null;
 }
 
+const LANG_ATTEMPTS: Array<{ lang?: string }> = [
+  {},
+  { lang: "ja" },
+  { lang: "en" },
+  { lang: "en-US" },
+];
+
 /**
  * Fetches the best available YouTube caption track for a video.
- * Prefers English, then Japanese (NihonGoal lessons often have JA auto-captions).
+ * Tries default track, then Japanese, then English.
  */
 export async function fetchYoutubeTranscript(
   videoId: string
@@ -36,20 +43,32 @@ export async function fetchYoutubeTranscript(
     throw new Error("Invalid video id.");
   }
 
-  let segments: Awaited<ReturnType<typeof YoutubeTranscript.fetchTranscript>>;
-  try {
-    segments = await YoutubeTranscript.fetchTranscript(id);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Could not load captions.";
-    throw new Error(
-      msg.includes("disabled") || msg.includes("Transcript")
-        ? "This video has no captions available. Turn on auto-captions on YouTube or pick another lesson."
-        : `Could not load captions: ${msg}`
-    );
+  let segments: Awaited<ReturnType<typeof YoutubeTranscript.fetchTranscript>> | null = null;
+  let lastErr: unknown;
+
+  for (const attempt of LANG_ATTEMPTS) {
+    try {
+      const batch = attempt.lang
+        ? await YoutubeTranscript.fetchTranscript(id, { lang: attempt.lang })
+        : await YoutubeTranscript.fetchTranscript(id);
+      if (batch.length > 0) {
+        segments = batch;
+        break;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
   }
 
-  if (!segments.length) {
-    throw new Error("No caption text found for this video.");
+  if (!segments?.length) {
+    const msg = lastErr instanceof Error ? lastErr.message : "Could not load captions.";
+    const noCaptions =
+      /disabled|not available|No transcripts/i.test(msg) || msg.includes("Transcript");
+    throw new Error(
+      noCaptions
+        ? "Could not load captions for this video. Use Add notes to paste your own write-up, or try again later."
+        : `Could not load captions: ${msg}`
+    );
   }
 
   const langs = new Set(
