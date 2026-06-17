@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import {
   isOpenAiTtsConfigured,
+  MAX_TUTOR_TTS_CHARS,
   openaiTextToSpeechMp3,
   type PracticeTtsRegister,
 } from "@/lib/openai-tts";
 
 export const runtime = "nodejs";
-
-const MAX_SPEAK_CHARS = 4096;
 
 export async function GET() {
   return NextResponse.json({ configured: isOpenAiTtsConfigured() });
@@ -32,8 +31,8 @@ export async function POST(req: Request) {
   if (!text) {
     return NextResponse.json({ error: "text is required." }, { status: 400 });
   }
-  if (text.length > MAX_SPEAK_CHARS) {
-    return NextResponse.json({ error: `text max ${MAX_SPEAK_CHARS} characters.` }, { status: 400 });
+  if (text.length > MAX_TUTOR_TTS_CHARS) {
+    return NextResponse.json({ error: `text max ${MAX_TUTOR_TTS_CHARS} characters.` }, { status: 400 });
   }
 
   const speechRegister: PracticeTtsRegister =

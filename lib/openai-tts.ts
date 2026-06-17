@@ -12,6 +12,9 @@ export const DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
 
 export type PracticeTtsRegister = "polite" | "casual";
 
+/** OpenAI TTS speed — slightly brisk for natural back-and-forth (0.25–4.0). */
+export const DEFAULT_OPENAI_TTS_SPEED = 1.1;
+
 /** Prosody instructions for OpenAI gpt-4o-mini-tts (Berry practice). */
 export function buildPracticeTtsInstructions(register: PracticeTtsRegister = "polite"): string {
   const registerNote =
@@ -19,13 +22,14 @@ export function buildPracticeTtsInstructions(register: PracticeTtsRegister = "po
       ? "Japanese lines use warm polite です／ます — friendly, not stiff broadcast Japanese."
       : "Japanese lines use casual plain speech — relaxed friend tone, not slangy host.";
   return [
-    "You are Berry（ベリー）, a warm young woman voice-chatting with a friend in the Philippines.",
+    "You are Berry（ベリー）, a warm woman with a slightly deeper relaxed alto voice — friendly and natural, never squeaky, breathy-high, or childlike.",
     "Sound fully human and alive — NEVER flat, monotone, or text-to-speech robotic.",
-    "Vary pitch and energy: lift slightly on questions, soften on empathy, gentle brightness on greetings and いいね moments.",
-    "Use natural conversational rhythm with brief pauses at commas and 、; phrase boundaries should breathe.",
+    "The entire input is ONE continuous utterance — read it straight through like natural speech, not separate clips or a list.",
+    "Do NOT pause at periods, 。, !, or ? — glide through them. Only a barely perceptible micro-pause at commas or 、.",
+    "Never insert dramatic silence, breath holds, or end-of-sentence stops between phrases.",
     registerNote,
     "Taglish: like a real Manila friend — warm, light, mixed Tagalog-English, not announcer English.",
-    "Keep an easy everyday pace; smile in your voice; never rush or drone.",
+    "Conversational everyday pace; smile in your voice; finish the whole line smoothly.",
   ].join(" ");
 }
 
@@ -53,19 +57,74 @@ export function resolveOpenAiTtsInstructions(register: PracticeTtsRegister = "po
   return undefined;
 }
 
+export function resolveOpenAiTtsSpeed(): number {
+  const raw = process.env.OPENAI_TTS_SPEED?.trim();
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0.25 && n <= 4) return n;
+  }
+  return DEFAULT_OPENAI_TTS_SPEED;
+}
+
 function supportsTtsInstructions(model: string): boolean {
   return model.includes("gpt-4o-mini");
 }
 
-/** Strip characters that sound odd in TTS. */
+export const MAX_TUTOR_TTS_CHARS = 4096;
+
+/** Strip markdown and normalize punctuation so TTS flows without long breaks. */
 export function textForTutorSpeech(raw: string): string {
   return raw
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/\*([^*]+)\*/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/^#+\s+/gm, "")
+    .replace(/…+/g, "、")
+    .replace(/\.{3,}/g, ",")
+    .replace(/\s*[,，]\s*/g, "、")
+    .replace(/\s*([。！？!?])\s*/g, "$1")
+    .replace(/([。！？!?])\s+/g, "$1 ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Split long replies at sentence boundaries so TTS never cuts off mid-sentence. */
+export function segmentTextForTutorTts(
+  text: string,
+  maxLen = MAX_TUTOR_TTS_CHARS
+): string[] {
+  const cleaned = textForTutorSpeech(text);
+  if (!cleaned) return [];
+  if (cleaned.length <= maxLen) return [cleaned];
+
+  const segments: string[] = [];
+  let rest = cleaned;
+
+  while (rest.length > 0) {
+    if (rest.length <= maxLen) {
+      segments.push(rest);
+      break;
+    }
+
+    const window = rest.slice(0, maxLen);
+    const boundary = /[。！？!?.\n]\s*/g;
+    let splitAt = -1;
+    let match: RegExpExecArray | null;
+    while ((match = boundary.exec(window)) !== null) {
+      splitAt = match.index + match[0].length;
+    }
+    if (splitAt < Math.floor(maxLen * 0.35)) {
+      const spaceAt = window.lastIndexOf(" ", maxLen);
+      splitAt = spaceAt >= Math.floor(maxLen * 0.35) ? spaceAt + 1 : maxLen;
+    }
+
+    const piece = rest.slice(0, splitAt).trim();
+    if (!piece) break;
+    segments.push(piece);
+    rest = rest.slice(splitAt).trim();
+  }
+
+  return segments;
 }
 
 export async function openaiTextToSpeechMp3(
@@ -77,22 +136,25 @@ export async function openaiTextToSpeechMp3(
 
   const input = textForTutorSpeech(text);
   if (!input) throw new Error("Nothing to speak.");
+  if (input.length > MAX_TUTOR_TTS_CHARS) {
+    throw new Error(`Text exceeds ${MAX_TUTOR_TTS_CHARS} characters for one TTS request.`);
+  }
 
   const register = options?.register === "casual" ? "casual" : "polite";
   const voice = resolveOpenAiTtsVoice();
   const model = resolveOpenAiTtsModel();
   const instructions = resolveOpenAiTtsInstructions(register);
+  const speed = resolveOpenAiTtsSpeed();
 
   const payload: Record<string, unknown> = {
     model,
     voice,
-    input: input.slice(0, 4096),
+    input,
     response_format: "mp3",
+    speed,
   };
   if (instructions && supportsTtsInstructions(model)) {
     payload.instructions = instructions;
-  } else {
-    payload.speed = 1;
   }
 
   const res = await fetch(OPENAI_SPEECH_URL, {

@@ -21,14 +21,10 @@ import {
   type PracticeSpeechRegister,
 } from "@/lib/japanese-practice-prompt";
 import {
-  pullSpeakableChunks,
-  remainingSpeakableTail,
-} from "@/lib/practice-speak-chunks";
-import {
   cancelPracticeSpeakQueue,
   enqueuePracticeSpeech,
+  practiceSpeakQueueActive,
   setPracticeSpeakRegister,
-  whenPracticeSpeakQueueIdle,
 } from "@/lib/practice-speak-queue";
 import { streamPracticeChat } from "@/lib/practice-stream-client";
 import {
@@ -40,6 +36,7 @@ import {
 import {
   cancelPracticeVoicePlayback,
   clearPracticeTtsPrefetch,
+  prefetchTutorLine,
   speakTutorLinePreferOpenAi,
 } from "@/lib/practice-voice-playback";
 import { acquirePracticeMic, type PracticeMicSession } from "@/lib/practice-mic";
@@ -47,7 +44,9 @@ import { startVoiceLevelMonitor } from "@/lib/voice-level-monitor";
 
 const STORAGE_KEY = "workspace-japanese-practice-v1";
 const MAX_INPUT = 4000;
-const LISTEN_AFTER_SPEAK_MS = 80;
+const LISTEN_AFTER_SPEAK_MS = 320;
+/** Extra mic deadband while Berry is playing (avoids speaker bleed). */
+const BERRY_SPEAKING_NOISE_FLOOR = 0.15;
 const MAX_CONTEXT_TURNS = 10;
 
 const jpFontClass =
@@ -152,15 +151,15 @@ function PhasePill({ phase }: { phase: VoicePhase }) {
 function phaseHeadline(
   phase: VoicePhase,
   voiceSession: boolean,
-  interim: string,
   detected: DetectedLanguage,
   speechActive: boolean,
-  phraseIncomplete: boolean
+  phraseIncomplete: boolean,
+  micMuted: boolean
 ): string {
   if (!voiceSession) return "Tap the circle to start";
   if (phase === "thinking") return `${TUTOR_NAME} is replying…`;
   if (phase === "speaking") return `Listen to ${TUTOR_NAME}`;
-  if (interim) return "Got it…";
+  if (micMuted) return "Mic off — unmute when you want to talk";
   if (phase === "listening") {
     if (phraseIncomplete && !speechActive) return "Finish your thought — still listening";
     if (speechActive) return "Keep going — brief pause when done";
@@ -188,6 +187,7 @@ export function WorkspaceJapanesePracticeSection() {
   const [autoSpeak, setAutoSpeak] = useState(initial.autoSpeak);
   const [detectedLang, setDetectedLang] = useState<DetectedLanguage>("unknown");
   const [voiceSession, setVoiceSession] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
   const [phase, setPhase] = useState<VoicePhase>("idle");
   const [interim, setInterim] = useState("");
   const [loading, setLoading] = useState(false);
@@ -197,26 +197,27 @@ export function WorkspaceJapanesePracticeSection() {
   const [ttsSupported, setTtsSupported] = useState(false);
   const [showTextFallback, setShowTextFallback] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
+  const showTranscriptRef = useRef(showTranscript);
   const [draft, setDraft] = useState("");
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [speechPulse, setSpeechPulse] = useState(0);
   const [speechDetected, setSpeechDetected] = useState(false);
+  const [speechActiveUi, setSpeechActiveUi] = useState(false);
   const [phraseIncomplete, setPhraseIncomplete] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const practiceMicRef = useRef<PracticeMicSession | null>(null);
   const voiceMonitorRef = useRef<{ stop: () => void } | null>(null);
 
-  const displayLevel = Math.max(voiceLevel, speechPulse);
+  const displayLevel = Math.max(
+    voiceLevel,
+    speechDetected && phase === "listening" ? speechPulse : 0
+  );
 
-  const bumpSpeechActivity = useCallback(() => {
-    setSpeechDetected(true);
-    setSpeechPulse(1);
-    setPhraseIncomplete(false);
-    setError(null);
-  }, []);
   const recognitionRef = useRef<ReturnType<typeof startUtteranceRecognition> | null>(null);
   const listenRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interimFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interimTextRef = useRef("");
   const voiceSessionRef = useRef(voiceSession);
   const loadingRef = useRef(loading);
   const messagesRef = useRef(messages);
@@ -224,7 +225,21 @@ export function WorkspaceJapanesePracticeSection() {
   const speechRegisterRef = useRef(speechRegister);
   const autoSpeakRef = useRef(autoSpeak);
   const ttsSupportedRef = useRef(ttsSupported);
+  const micMutedRef = useRef(micMuted);
   const listenLangRef = useRef<SpeechInputLang>("ja-JP");
+  const speakingIdRef = useRef(speakingId);
+  const stopSpeakRef = useRef<(() => void) | null>(null);
+  const phaseRef = useRef(phase);
+
+  const isBerryAudioActive = useCallback(() => {
+    return (
+      practiceSpeakQueueActive() ||
+      Boolean(speakingIdRef.current) ||
+      phaseRef.current === "speaking" ||
+      phaseRef.current === "thinking" ||
+      loadingRef.current
+    );
+  }, []);
 
   voiceSessionRef.current = voiceSession;
   loadingRef.current = loading;
@@ -234,6 +249,27 @@ export function WorkspaceJapanesePracticeSection() {
   setPracticeSpeakRegister(speechRegister);
   autoSpeakRef.current = autoSpeak;
   ttsSupportedRef.current = ttsSupported;
+  micMutedRef.current = micMuted;
+  showTranscriptRef.current = showTranscript;
+  speakingIdRef.current = speakingId;
+  phaseRef.current = phase;
+
+  const interruptBerryIfSpeaking = useCallback(() => {
+    if (!practiceSpeakQueueActive() && !speakingIdRef.current) return;
+    stopSpeakRef.current?.();
+    if (voiceSessionRef.current && !loadingRef.current) {
+      setPhase("listening");
+    }
+  }, []);
+
+  const bumpSpeechActivity = useCallback(() => {
+    if (micMutedRef.current || isBerryAudioActive()) return;
+    interruptBerryIfSpeaking();
+    setSpeechDetected(true);
+    setSpeechPulse(1);
+    setPhraseIncomplete(false);
+    setError(null);
+  }, [interruptBerryIfSpeaking, isBerryAudioActive]);
 
   useEffect(() => {
     setSttSupported(isBrowserSpeechInputSupported());
@@ -326,10 +362,29 @@ export function WorkspaceJapanesePracticeSection() {
       return;
     }
     const id = window.setInterval(() => {
-      setSpeechPulse((p) => Math.max(0, p * 0.86 - 0.015));
-    }, 48);
+      setSpeechPulse((p) => (p <= 0.02 ? 0 : p * 0.88));
+    }, 100);
     return () => window.clearInterval(id);
   }, [phase]);
+
+  useEffect(() => {
+    const berryActive =
+      practiceSpeakQueueActive() ||
+      Boolean(speakingIdRef.current) ||
+      phase === "speaking" ||
+      phase === "thinking" ||
+      loading;
+    const rawActive =
+      !micMuted &&
+      !berryActive &&
+      (speechDetected || voiceLevel > 0.08 || interim.length > 0);
+    if (rawActive) {
+      setSpeechActiveUi(true);
+      return;
+    }
+    const id = window.setTimeout(() => setSpeechActiveUi(false), 450);
+    return () => window.clearTimeout(id);
+  }, [micMuted, speechDetected, voiceLevel, interim, phase, loading]);
 
   const clearListenRestartTimer = useCallback(() => {
     if (listenRestartTimerRef.current) {
@@ -359,36 +414,121 @@ export function WorkspaceJapanesePracticeSection() {
       (level) => {
         setVoiceLevel(level);
       },
-      { stream, stopTracksOnRelease: false }
+      {
+        stream,
+        stopTracksOnRelease: false,
+        noiseFloor: () => (isBerryAudioActive() ? BERRY_SPEAKING_NOISE_FLOOR : 0.032),
+      }
     );
     if (!monitor) return false;
     voiceMonitorRef.current = monitor;
     return true;
-  }, []);
+  }, [isBerryAudioActive]);
 
   const abortListening = useCallback(() => {
+    if (interimFlushRef.current) {
+      clearTimeout(interimFlushRef.current);
+      interimFlushRef.current = null;
+    }
     recognitionRef.current?.abort();
     recognitionRef.current = null;
     setInterim("");
+    interimTextRef.current = "";
     setSpeechDetected(false);
     setPhraseIncomplete(false);
   }, []);
+
+  useEffect(() => {
+    if (phase === "speaking" || phase === "thinking" || loading) {
+      abortListening();
+    }
+  }, [phase, loading, abortListening]);
 
   const stopSpeak = useCallback(() => {
     cancelPracticeSpeakQueue();
     cancelPracticeVoicePlayback();
     setSpeakingId(null);
-    if (phase === "speaking") setPhase("idle");
+    if (phase === "speaking") {
+      setPhase(voiceSessionRef.current ? "listening" : "idle");
+    }
   }, [phase]);
+  stopSpeakRef.current = stopSpeak;
+
+  const restoreListeningPhase = useCallback(() => {
+    if (!voiceSessionRef.current) {
+      setPhase("idle");
+      return;
+    }
+    if (loadingRef.current) return;
+    if (micMutedRef.current) {
+      setPhase("listening");
+      return;
+    }
+    setPhase("listening");
+  }, []);
+
+  const setMicMutedState = useCallback(
+    (muted: boolean) => {
+      if (!muted) {
+        micMutedRef.current = false;
+        setMicMuted(false);
+        practiceMicRef.current?.setMuted(false);
+        if (voiceSessionRef.current && !loadingRef.current && !recognitionRef.current) {
+          beginListeningRef.current?.();
+        }
+        return;
+      }
+
+      clearListenRestartTimer();
+      const session = recognitionRef.current;
+      const pendingText = interimTextRef.current.trim();
+
+      micMutedRef.current = true;
+      setMicMuted(true);
+      practiceMicRef.current?.setMuted(true);
+
+      if (session) {
+        session.submitPending();
+      } else if (pendingText) {
+        void sendToApiRef.current?.(pendingText);
+      }
+
+      if (interimFlushRef.current) {
+        clearTimeout(interimFlushRef.current);
+        interimFlushRef.current = null;
+      }
+      setInterim("");
+      interimTextRef.current = "";
+      setSpeechDetected(false);
+      setPhraseIncomplete(false);
+      setVoiceLevel(0);
+      setSpeechPulse(0);
+    },
+    [clearListenRestartTimer]
+  );
+
+  const toggleMicMute = useCallback(() => {
+    setMicMutedState(!micMutedRef.current);
+  }, [setMicMutedState]);
 
   const scheduleListenAfterReply = useCallback(() => {
     clearListenRestartTimer();
-    if (!voiceSessionRef.current || loadingRef.current) return;
+    if (!voiceSessionRef.current || loadingRef.current || micMutedRef.current) return;
     listenRestartTimerRef.current = setTimeout(() => {
       listenRestartTimerRef.current = null;
-      if (voiceSessionRef.current && !loadingRef.current) {
-        beginListeningRef.current?.();
+      if (
+        !voiceSessionRef.current ||
+        loadingRef.current ||
+        micMutedRef.current ||
+        practiceSpeakQueueActive() ||
+        speakingIdRef.current
+      ) {
+        if (voiceSessionRef.current && !micMutedRef.current) {
+          scheduleListenAfterReply();
+        }
+        return;
       }
+      beginListeningRef.current?.();
     }, LISTEN_AFTER_SPEAK_MS);
   }, [clearListenRestartTimer]);
 
@@ -405,12 +545,12 @@ export function WorkspaceJapanesePracticeSection() {
       {
         onEnd: () => {
           setSpeakingId(null);
-          setPhase("idle");
+          restoreListeningPhase();
           onDone?.();
         },
         onError: (code) => {
           setSpeakingId(null);
-          setPhase("idle");
+          restoreListeningPhase();
           if (code === "not-allowed") {
             setError("Speech was blocked. Allow sound for this site, then try again.");
           }
@@ -419,12 +559,15 @@ export function WorkspaceJapanesePracticeSection() {
       },
       { speechRegister: speechRegisterRef.current }
     );
-  }, []);
+  }, [restoreListeningPhase]);
 
   const beginListeningRef = useRef<(() => void) | null>(null);
 
   const beginListening = useCallback(() => {
-    if (!sttSupported || !voiceSessionRef.current || loadingRef.current) return;
+    if (!sttSupported || !voiceSessionRef.current || loadingRef.current || micMutedRef.current) {
+      return;
+    }
+    if (isBerryAudioActive()) return;
     abortListening();
     setPhase("listening");
     setError(null);
@@ -440,35 +583,48 @@ export function WorkspaceJapanesePracticeSection() {
     const session = startUtteranceRecognition({
       lang,
       audioTrack: practiceMicRef.current?.track,
-      silenceMs: 650,
-      silenceMsAfterFinal: 360,
-      silenceMsIncomplete: 1150,
-      silenceMsIncompleteAfterFinal: 1350,
+      silenceMs: 550,
+      silenceMsAfterFinal: 200,
+      silenceMsIncomplete: 1050,
+      silenceMsIncompleteAfterFinal: 1200,
       onListening: () => setPhase("listening"),
       onSpeechActivity: bumpSpeechActivity,
-      onPhraseIncomplete: () => setPhraseIncomplete(true),
+      onPhraseIncomplete: () => {
+        if (micMutedRef.current) return;
+        setPhraseIncomplete(true);
+      },
       onInterim: (text) => {
+        if (micMutedRef.current || isBerryAudioActive()) return;
         bumpSpeechActivity();
-        setInterim(text);
-        const live = detectUtteranceLanguage(text);
-        if (live !== "unknown") setDetectedLang(live);
+        interimTextRef.current = text;
+        if (interimFlushRef.current) return;
+        interimFlushRef.current = setTimeout(() => {
+          interimFlushRef.current = null;
+          setInterim(interimTextRef.current);
+          const live = detectUtteranceLanguage(interimTextRef.current);
+          if (live !== "unknown") setDetectedLang(live);
+        }, 140);
       },
       onUtteranceComplete: (text) => {
+        if (isBerryAudioActive()) return;
         setPhraseIncomplete(false);
         const detected = detectUtteranceLanguage(text);
         setDetectedLang(detected);
         listenLangRef.current = detectedLanguageToSpeechLang(detected, text);
         setInterim("");
+        interimTextRef.current = "";
         recognitionRef.current = null;
         void sendToApiRef.current?.(text);
       },
       onEmpty: () => {
+        if (micMutedRef.current) return;
         setError("Didn't catch that — try speaking a bit louder, then pause.");
         setPhase("listening");
         if (voiceSessionRef.current) scheduleListenAfterReply();
       },
       onError: (code) => {
         recognitionRef.current = null;
+        if (micMutedRef.current) return;
         if (code === "not-allowed") {
           setError("Microphone blocked. Allow mic access, then start again.");
           setVoiceSession(false);
@@ -492,7 +648,7 @@ export function WorkspaceJapanesePracticeSection() {
       return;
     }
     recognitionRef.current = session;
-  }, [sttSupported, abortListening, scheduleListenAfterReply, bumpSpeechActivity]);
+  }, [sttSupported, abortListening, scheduleListenAfterReply, bumpSpeechActivity, isBerryAudioActive]);
 
   beginListeningRef.current = beginListening;
 
@@ -533,8 +689,7 @@ export function WorkspaceJapanesePracticeSection() {
 
       const useLiveVoice =
         voiceSessionRef.current && autoSpeakRef.current && ttsSupportedRef.current;
-      let spokenUpTo = 0;
-      let startedSpeaking = false;
+      let streamPrefetchTimer: ReturnType<typeof setTimeout> | null = null;
 
       const afterReply = () => {
         if (voiceSessionRef.current) scheduleListenAfterReply();
@@ -542,23 +697,19 @@ export function WorkspaceJapanesePracticeSection() {
 
       const onVoiceReplyDone = () => {
         setSpeakingId(null);
-        setPhase("idle");
+        restoreListeningPhase();
         afterReply();
       };
 
-      const maybeSpeakFromStream = (accumulated: string) => {
-        if (!useLiveVoice) return;
-        const { chunks, newSpokenUpTo } = pullSpeakableChunks(accumulated, spokenUpTo);
-        spokenUpTo = newSpokenUpTo;
-        if (chunks.length === 0) return;
-        if (!startedSpeaking) {
-          startedSpeaking = true;
-          setPhase("speaking");
-          setSpeakingId(assistantId);
-        }
-        enqueuePracticeSpeech(chunks, undefined, {
-          speechRegister: speechRegisterRef.current,
-        });
+      const maybePrefetchFromStream = (accumulated: string) => {
+        if (!useLiveVoice || !accumulated.trim()) return;
+        if (streamPrefetchTimer) clearTimeout(streamPrefetchTimer);
+        streamPrefetchTimer = setTimeout(() => {
+          streamPrefetchTimer = null;
+          prefetchTutorLine(accumulated, {
+            speechRegister: speechRegisterRef.current,
+          });
+        }, 300);
       };
 
       const finishSpeech = (reply: string) => {
@@ -566,25 +717,33 @@ export function WorkspaceJapanesePracticeSection() {
           afterReply();
           return;
         }
+        if (streamPrefetchTimer) {
+          clearTimeout(streamPrefetchTimer);
+          streamPrefetchTimer = null;
+        }
         if (useLiveVoice) {
-          const tail = remainingSpeakableTail(reply, spokenUpTo);
-          if (!startedSpeaking) {
-            setPhase("speaking");
-            setSpeakingId(assistantId);
-            enqueuePracticeSpeech([reply], { onEnd: onVoiceReplyDone }, {
-              speechRegister: speechRegisterRef.current,
-            });
-          } else if (tail) {
-            enqueuePracticeSpeech([tail], { onEnd: onVoiceReplyDone }, {
-              speechRegister: speechRegisterRef.current,
-            });
-          } else {
-            whenPracticeSpeakQueueIdle(onVoiceReplyDone);
-          }
+          setPhase("speaking");
+          setSpeakingId(assistantId);
+          prefetchTutorLine(reply, { speechRegister: speechRegisterRef.current });
+          enqueuePracticeSpeech([reply], { onEnd: onVoiceReplyDone }, {
+            speechRegister: speechRegisterRef.current,
+          });
           return;
         }
         setPhase("speaking");
         speakMessage(assistantId, reply, afterReply);
+      };
+
+      let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+      let pendingStreamText = "";
+
+      const flushStreamTranscript = () => {
+        streamFlushTimer = null;
+        if (!pendingStreamText || !showTranscriptRef.current) return;
+        const text = pendingStreamText;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: text } : m))
+        );
       };
 
       try {
@@ -594,6 +753,7 @@ export function WorkspaceJapanesePracticeSection() {
         }));
 
         let reply = "";
+
         try {
           const streamed = await streamPracticeChat(
             {
@@ -603,13 +763,19 @@ export function WorkspaceJapanesePracticeSection() {
             },
             (accumulated) => {
               reply = accumulated;
-              setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: accumulated } : m))
-              );
-              maybeSpeakFromStream(accumulated);
+              pendingStreamText = accumulated;
+              maybePrefetchFromStream(accumulated);
+              if (!showTranscriptRef.current) return;
+              if (!streamFlushTimer) {
+                streamFlushTimer = setTimeout(flushStreamTranscript, 300);
+              }
             }
           );
           reply = streamed.text;
+          if (streamFlushTimer) {
+            clearTimeout(streamFlushTimer);
+            streamFlushTimer = null;
+          }
           if (streamed.detectedLanguage) {
             setDetectedLang(streamed.detectedLanguage);
           }
@@ -646,9 +812,11 @@ export function WorkspaceJapanesePracticeSection() {
         setError(e instanceof Error ? e.message : "Something went wrong.");
         setMessages((prev) => prev.filter((m) => m.id !== userMsg.id && m.id !== assistantId));
         cancelPracticeSpeakQueue();
-        setPhase("idle");
+        restoreListeningPhase();
         if (voiceSessionRef.current) scheduleListenAfterReply();
       } finally {
+        if (streamPrefetchTimer) clearTimeout(streamPrefetchTimer);
+        if (streamFlushTimer) clearTimeout(streamFlushTimer);
         setLoading(false);
         loadingRef.current = false;
       }
@@ -659,6 +827,7 @@ export function WorkspaceJapanesePracticeSection() {
       stopSpeak,
       speakMessage,
       scheduleListenAfterReply,
+      restoreListeningPhase,
     ]
   );
 
@@ -666,6 +835,8 @@ export function WorkspaceJapanesePracticeSection() {
 
   const stopVoiceSession = useCallback(() => {
     setVoiceSession(false);
+    setMicMuted(false);
+    micMutedRef.current = false;
     clearListenRestartTimer();
     abortListening();
     stopVoiceMonitor();
@@ -724,14 +895,14 @@ export function WorkspaceJapanesePracticeSection() {
     };
   }, [clearListenRestartTimer, stopVoiceMonitor, stopPracticeMic]);
 
-  const speechActive = speechDetected || displayLevel > 0.03 || interim.length > 0;
+  const speechActive = speechActiveUi;
   const headline = phaseHeadline(
     phase,
     voiceSession,
-    interim,
     detectedLang,
     speechActive,
-    phraseIncomplete
+    phraseIncomplete,
+    micMuted
   );
 
   return (
@@ -841,9 +1012,39 @@ export function WorkspaceJapanesePracticeSection() {
           />
 
           <div className="relative mx-auto w-full max-w-md rounded-3xl border border-pink-100/90 bg-white/90 px-5 py-8 shadow-[0_2px_20px_rgba(244,63,94,0.08)] backdrop-blur-sm sm:px-8 sm:py-10">
+            {voiceSession && (
+              <button
+                type="button"
+                onClick={toggleMicMute}
+                aria-pressed={!micMuted}
+                aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
+                title={micMuted ? "Unmute microphone" : "Mute microphone"}
+                className={`absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 focus-visible:ring-offset-2 sm:right-5 sm:top-5 ${
+                  micMuted
+                    ? "border-pink-300 bg-pink-100 text-pink-700 hover:bg-pink-200"
+                    : "border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100"
+                }`}
+              >
+                {micMuted ? (
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                    <path d="M12 19v3" strokeLinecap="round" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" strokeLinecap="round" />
+                    <path d="M12 15a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v7a3 3 0 0 0 3 3Z" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="m3 3 18 18" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                    <path d="M12 19v3" strokeLinecap="round" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" strokeLinecap="round" />
+                    <path d="M12 15a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v7a3 3 0 0 0 3 3Z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            )}
             <p
               className="text-center text-lg font-semibold tracking-tight text-stone-900 sm:text-xl"
               aria-live="polite"
+              aria-atomic="true"
             >
               {headline}
             </p>
@@ -855,56 +1056,58 @@ export function WorkspaceJapanesePracticeSection() {
                 disabled={!sttSupported || openAiReady === false}
                 aria-pressed={voiceSession}
                 aria-label={voiceSession ? "End conversation" : "Start conversation"}
-                className={`relative flex h-32 w-32 items-center justify-center rounded-full transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 focus-visible:ring-offset-4 disabled:opacity-45 sm:h-36 sm:w-36 ${
-                  phase === "listening"
-                    ? "bg-gradient-to-br from-rose-400 to-pink-500 shadow-[0_0_0_6px_rgba(255,255,255,0.9),0_0_40px_rgba(244,63,94,0.45)]"
-                    : phase === "thinking"
-                      ? "bg-gradient-to-br from-amber-300 to-orange-400 shadow-[0_0_32px_rgba(251,191,36,0.35)]"
-                      : phase === "speaking"
-                        ? "bg-gradient-to-br from-pink-400 to-rose-500 shadow-[0_0_40px_rgba(236,72,153,0.4)]"
-                        : "bg-gradient-to-br from-pink-300 to-rose-400 shadow-lg hover:scale-[1.02] hover:shadow-xl"
-                } ${phase === "listening" && speechActive ? "scale-[1.03]" : ""}`}
+                className={`relative flex h-32 w-32 items-center justify-center rounded-full transition-[box-shadow,background] duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 focus-visible:ring-offset-4 disabled:opacity-45 sm:h-36 sm:w-36 ${
+                  phase === "thinking"
+                    ? "bg-gradient-to-br from-amber-300 to-orange-400 shadow-[0_0_32px_rgba(251,191,36,0.35)]"
+                    : phase === "speaking"
+                      ? "bg-gradient-to-br from-pink-400 to-rose-500 shadow-[0_0_40px_rgba(236,72,153,0.4)]"
+                      : micMuted
+                        ? "bg-gradient-to-br from-rose-300 to-pink-400 shadow-[0_0_28px_rgba(244,63,94,0.3)]"
+                        : phase === "listening"
+                          ? "bg-gradient-to-br from-rose-400 to-pink-500 shadow-[0_0_0_6px_rgba(255,255,255,0.9),0_0_40px_rgba(244,63,94,0.45)]"
+                          : "bg-gradient-to-br from-pink-300 to-rose-400 shadow-lg hover:shadow-xl"
+                }`}
               >
                 <span className="flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-full bg-white text-3xl font-bold text-pink-600 shadow-inner sm:h-20 sm:w-20">
                   {TUTOR_NAME.slice(0, 1)}
                 </span>
-                {phase === "listening" && !speechActive && (
-                  <span
-                    className="absolute inset-0 rounded-full ring-2 ring-white/40 ring-offset-2 ring-offset-transparent animate-ping"
-                    aria-hidden
-                  />
-                )}
               </button>
 
               <div
-                className={`mt-6 w-full min-w-[220px] rounded-2xl px-4 py-3 transition-colors ${
+                className={`mt-6 w-full min-w-[220px] rounded-2xl px-4 py-3 ${
                   speechActive
                     ? "bg-rose-50 ring-1 ring-rose-200"
                     : voiceSession && phase === "listening"
-                      ? "bg-stone-50 ring-1 ring-stone-100"
+                      ? micMuted
+                        ? "bg-pink-50/90 ring-1 ring-pink-200"
+                        : "bg-stone-50 ring-1 ring-stone-100"
                       : "bg-transparent"
                 }`}
               >
                 <VoiceActivityVisualizer
                   phase={phase}
-                  level={displayLevel}
-                  speechDetected={speechDetected || interim.length > 0}
+                  level={micMuted ? 0 : displayLevel}
+                  speechDetected={!micMuted && (speechDetected || interim.length > 0)}
                 />
                 {voiceSession && phase === "listening" && (
                   <p
                     className={`mt-2 text-center text-[11px] font-medium ${
-                      speechActive
-                        ? "text-rose-600"
-                        : phraseIncomplete
-                          ? "text-amber-700"
-                          : "text-stone-400"
+                      micMuted
+                        ? "text-pink-600"
+                        : speechActive
+                          ? "text-rose-600"
+                          : phraseIncomplete
+                            ? "text-amber-700"
+                            : "text-stone-400"
                     }`}
                   >
-                    {speechActive
-                      ? "Voice detected"
-                      : phraseIncomplete
-                        ? "Mid-sentence — keep talking"
-                        : "Waiting for you…"}
+                    {micMuted
+                      ? "Mic off — Berry can still reply"
+                      : speechActive
+                        ? "Voice detected"
+                        : phraseIncomplete
+                          ? "Mid-sentence — keep talking"
+                          : "Waiting for you…"}
                   </p>
                 )}
               </div>
@@ -919,6 +1122,18 @@ export function WorkspaceJapanesePracticeSection() {
                     className="min-w-[10rem] rounded-xl border border-stone-200 bg-white px-5 py-2.5 text-sm font-semibold text-stone-700 shadow-sm transition hover:border-rose-200 hover:bg-rose-50"
                   >
                     End conversation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleMicMute}
+                    aria-pressed={!micMuted}
+                    className={`min-w-[10rem] rounded-xl border px-5 py-2.5 text-sm font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 focus-visible:ring-offset-2 ${
+                      micMuted
+                        ? "border-pink-300 bg-pink-100 text-pink-800 hover:bg-pink-200"
+                        : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                    }`}
+                  >
+                    {micMuted ? "Unmute mic" : "Mute mic"}
                   </button>
                   {speakingId && (
                     <button type="button" onClick={stopSpeak} className={btnGhost}>
@@ -941,7 +1156,9 @@ export function WorkspaceJapanesePracticeSection() {
 
           <p className="mx-auto mt-5 max-w-md text-center text-xs leading-relaxed text-stone-500">
             {voiceSession
-              ? `Hands-free — pause briefly when you finish. ${TUTOR_NAME} replies as soon as she can.`
+              ? micMuted
+                ? "Mic is off — what you already said still goes to Berry. Unmute to talk again."
+                : `Hands-free — pause briefly when you finish. ${TUTOR_NAME} replies as soon as she can.`
               : "Japanese, English, or Tagalog. One tap, no holding buttons."}
           </p>
         </div>

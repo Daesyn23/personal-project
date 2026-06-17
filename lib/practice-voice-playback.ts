@@ -102,6 +102,7 @@ function playMp3Url(url: string, callbacks: PracticeSpeakCallbacks): void {
   cancelPracticeVoicePlayback();
   activeObjectUrl = url;
   const audio = new Audio(url);
+  audio.preload = "auto";
   activeAudio = audio;
   audio.onended = () => {
     cancelPracticeVoicePlayback();

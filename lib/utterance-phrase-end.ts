@@ -44,10 +44,12 @@ export function classifyPhraseEnd(text: string): PhraseEndKind {
   if (EN_INCOMPLETE_SUFFIX.test(t)) return "incomplete";
   if (TL_INCOMPLETE_SUFFIX.test(t)) return "incomplete";
 
+  const charCount = t.replace(/\s+/g, "").length;
+
   /** Short backchannels / greetings without a dangling particle. */
-  if (t.length <= 12 && !/[、,]$/.test(t)) {
+  if (t.length <= 16 && !/[、,]$/.test(t)) {
     if (
-      /^(?:はい|いいえ|うん|ううん|そう|そうです|ねえ|あの|ええと|ok|okay|yes|no|oo|opo|hindi|sige|ayos)\s*$/iu.test(
+      /^(?:はい|いいえ|うん|ううん|そう|そうです|ねえ|あの|ええと|ok|okay|yes|no|oo|opo|hindi|sige|ayos|salamat|thanks|thank you)\s*[!?.。]?$/iu.test(
         t
       )
     ) {
@@ -55,11 +57,15 @@ export function classifyPhraseEnd(text: string): PhraseEndKind {
     }
   }
 
+  /** Casual Japanese / Taglish question or affirmation enders without explicit 。 */
+  if (/(?:ね|よ|よね|だよ|でしょ|right|ba|no\?|diba)\s*[!?.。]?$/iu.test(t) && charCount >= 4) {
+    return "complete";
+  }
+
   /**
    * No clear ender — treat longer pauses as complete only if substantial
    * (user likely finished an informal sentence without です).
    */
-  const charCount = t.replace(/\s+/g, "").length;
   if (charCount >= 18 && !/[、,]$/.test(t)) return "complete";
 
   return "incomplete";

@@ -3,6 +3,7 @@
  */
 
 import type { PracticeTtsRegister } from "@/lib/openai-tts";
+import { segmentTextForTutorTts } from "@/lib/openai-tts";
 import {
   prefetchTutorLine,
   speakTutorLine,
@@ -60,6 +61,9 @@ function drain(): void {
 
   if (queue.length > 0) {
     prefetchTutorLine(queue[0]!.text, { speechRegister: queue[0]!.register });
+    if (queue.length > 1) {
+      prefetchTutorLine(queue[1]!.text, { speechRegister: queue[1]!.register });
+    }
   }
 
   void (async () => {
@@ -106,8 +110,9 @@ export function enqueuePracticeSpeech(
 
   mergeSessionCallbacks(callbacks);
 
-  for (const text of trimmed) {
-    queue.push({ text, register });
+  const combined = trimmed.join(" ");
+  for (const segment of segmentTextForTutorTts(combined)) {
+    queue.push({ text: segment, register });
   }
 
   if (!draining && queue.length > 0) {

@@ -145,8 +145,8 @@ export function speakJapaneseLine(
       } else {
         u.lang = shortJa ? "ja" : "ja-JP";
       }
-      u.rate = Math.min(1, kind === "reading" ? 0.88 : kind === "practice" ? 0.96 : 0.9);
-      u.pitch = kind === "practice" ? 1.04 : 1;
+      u.rate = Math.min(1.15, kind === "reading" ? 0.88 : kind === "practice" ? 1.04 : 0.9);
+      u.pitch = kind === "practice" ? 0.93 : 1;
       u.onend = () => callbacks.onEnd?.();
       u.onerror = (ev) => {
         const e = ev as SpeechSynthesisErrorEvent;
@@ -221,8 +221,8 @@ export function speakEnglishLine(
       } else {
         u.lang = "en-US";
       }
-      u.rate = Math.min(1, kind === "practice" ? 0.96 : 0.9);
-      u.pitch = kind === "practice" ? 1.03 : 1;
+      u.rate = Math.min(1.15, kind === "practice" ? 1.04 : 0.9);
+      u.pitch = kind === "practice" ? 0.92 : 1;
       u.onend = () => callbacks.onEnd?.();
       u.onerror = (ev) => {
         const e = ev as SpeechSynthesisErrorEvent;
