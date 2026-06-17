@@ -37,13 +37,26 @@ export const DEFAULT_PRACTICE_VOICE_SETTINGS: PracticeVoiceSettings = {
 
 export type PracticeVoiceSettingsPreset = "patient" | "balanced" | "quick";
 
+function formatWaitTime(ms: number): string {
+  const sec = ms / 1000;
+  if (sec >= 10) return `${Math.round(sec)} sec`;
+  if (Math.abs(sec - Math.round(sec)) < 0.05) return `${Math.round(sec)} sec`;
+  return `${sec.toFixed(1)} sec`;
+}
+
+function formatEchoGuard(level: number): string {
+  if (level < 0.11) return "Low";
+  if (level < 0.18) return "Medium";
+  return "High";
+}
+
 export const PRACTICE_VOICE_PRESETS: Record<
   PracticeVoiceSettingsPreset,
   { label: string; hint: string; settings: PracticeVoiceSettings }
 > = {
   patient: {
     label: "Patient",
-    hint: "Longest thinking pauses",
+    hint: "Berry waits longer — use this if she talks over you",
     settings: {
       silenceMsIncomplete: 3200,
       silenceMsIncompleteAfterFinal: 3800,
@@ -57,12 +70,12 @@ export const PRACTICE_VOICE_PRESETS: Record<
   },
   balanced: {
     label: "Balanced",
-    hint: "Recommended default",
+    hint: "Works well for most people",
     settings: { ...DEFAULT_PRACTICE_VOICE_SETTINGS },
   },
   quick: {
     label: "Quick",
-    hint: "Shorter pauses",
+    hint: "Berry replies sooner — less waiting",
     settings: {
       silenceMsIncomplete: 1400,
       silenceMsIncompleteAfterFinal: 1700,
@@ -91,57 +104,55 @@ export const PRACTICE_VOICE_SETTING_FIELDS: {
   key: keyof PracticeVoiceSettings;
   label: string;
   hint: string;
-  unit: string;
-  format?: (v: number) => string;
+  format: (v: number) => string;
 }[] = [
   {
     key: "silenceMsIncomplete",
-    label: "Thinking pause",
-    hint: "How long you can pause mid-sentence before Berry replies",
-    unit: "ms",
+    label: "Pause while you think",
+    hint: "How long you can stop in the middle of a sentence before Berry answers",
+    format: formatWaitTime,
   },
   {
     key: "silenceMsIncompleteAfterFinal",
-    label: "Thinking pause (after a chunk)",
-    hint: "Extra buffer after speech recognition finalizes part of your line",
-    unit: "ms",
+    label: "Extra thinking time",
+    hint: "If you said a few words then paused, Berry waits this much longer",
+    format: formatWaitTime,
   },
   {
     key: "maxIncompleteWaitMs",
-    label: "Max thinking time",
-    hint: "Longest total wait while you are still mid-thought",
-    unit: "ms",
+    label: "Longest wait for you",
+    hint: "The most Berry will wait while you are still working on your thought",
+    format: formatWaitTime,
   },
   {
     key: "silenceMsAfterFinal",
-    label: "Done pause",
-    hint: "Pause after a clear sentence ending before Berry replies",
-    unit: "ms",
+    label: "When you clearly finished",
+    hint: "Short pause after a full sentence — then Berry replies",
+    format: formatWaitTime,
   },
   {
     key: "silenceMs",
-    label: "General pause",
-    hint: "Fallback silence when it is unclear if you are done",
-    unit: "ms",
+    label: "When Berry is unsure",
+    hint: "If it is not obvious you are done, Berry waits this long before replying",
+    format: formatWaitTime,
   },
   {
     key: "completePhraseCutoffMs",
-    label: "Fast send on ender",
-    hint: "How quickly to send when an end-of-phrase is detected",
-    unit: "ms",
+    label: "Speed when you are done",
+    hint: "How fast Berry responds once she hears a clear ending (like a period or です)",
+    format: formatWaitTime,
   },
   {
     key: "listenAfterSpeakMs",
     label: "After Berry speaks",
-    hint: "Wait before the mic opens again (reduces speaker echo)",
-    unit: "ms",
+    hint: "Short pause when Berry finishes, before the mic turns back on for you",
+    format: formatWaitTime,
   },
   {
     key: "berrySpeakingNoiseFloor",
-    label: "Echo guard",
-    hint: "Higher = less likely Berry's voice triggers the mic",
-    unit: "",
-    format: (v) => v.toFixed(2),
+    label: "Ignore Berry's voice",
+    hint: "Higher means your mic is less likely to hear Berry from your speakers",
+    format: formatEchoGuard,
   },
 ];
 

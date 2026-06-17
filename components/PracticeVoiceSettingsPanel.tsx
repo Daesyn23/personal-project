@@ -39,10 +39,10 @@ export function PracticeVoiceSettingsPanel({ settings, onChange, disabled }: Pro
     <div className="space-y-4 rounded-xl border border-pink-100 bg-pink-50/40 p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-stone-900">Voice timing</p>
+          <p className="text-sm font-semibold text-stone-900">How long Berry waits</p>
           <p className="mt-0.5 text-xs leading-relaxed text-stone-600">
-            Calibrate how long Berry waits while you think. Try <span className="font-medium">Patient</span> if
-            she cuts you off mid-sentence.
+            Berry listens without holding a button. If she talks while you are still thinking, tap{" "}
+            <span className="font-medium text-pink-800">Patient</span>. You can adjust the sliders below.
           </p>
         </div>
         <button
@@ -51,7 +51,7 @@ export function PracticeVoiceSettingsPanel({ settings, onChange, disabled }: Pro
           disabled={disabled}
           className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 shadow-sm transition hover:border-pink-200 hover:bg-pink-50 disabled:opacity-45"
         >
-          Reset defaults
+          Reset to recommended
         </button>
       </div>
 
@@ -74,15 +74,15 @@ export function PracticeVoiceSettingsPanel({ settings, onChange, disabled }: Pro
       </div>
 
       <div className="space-y-4">
-        {PRACTICE_VOICE_SETTING_FIELDS.map(({ key, label, hint, unit, format }) => {
+        {PRACTICE_VOICE_SETTING_FIELDS.map(({ key, label, hint, format }) => {
           const bounds = settingBounds(key);
           const value = settings[key];
-          const display = format ? format(value) : `${Math.round(value)}${unit ? ` ${unit}` : ""}`;
+          const display = format(value);
           return (
             <label key={key} className="block">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-xs font-semibold text-stone-800">{label}</span>
-                <span className="shrink-0 text-xs font-bold tabular-nums text-pink-700">{display}</span>
+                <span className="shrink-0 text-xs font-bold text-pink-700">{display}</span>
               </div>
               <p className="mt-0.5 text-[11px] leading-snug text-stone-500">{hint}</p>
               <input

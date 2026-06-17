@@ -1033,8 +1033,8 @@ export function WorkspaceJapanesePracticeSection() {
               type="button"
               onClick={() => setShowVoiceSettings((v) => !v)}
               aria-expanded={showVoiceSettings}
-              aria-label="Voice timing settings"
-              title="Calibrate pause sensitivity"
+              aria-label="How long Berry waits settings"
+              title="Adjust how long Berry waits before she replies"
               className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 focus-visible:ring-offset-2 ${
                 showVoiceSettings
                   ? "border-pink-300 bg-pink-100 text-pink-800"
