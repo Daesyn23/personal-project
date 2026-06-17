@@ -40,13 +40,15 @@ import {
   speakTutorLinePreferOpenAi,
 } from "@/lib/practice-voice-playback";
 import { acquirePracticeMic, type PracticeMicSession } from "@/lib/practice-mic";
+import {
+  loadPracticeVoiceSettings,
+  type PracticeVoiceSettings,
+} from "@/lib/practice-voice-settings";
 import { startVoiceLevelMonitor } from "@/lib/voice-level-monitor";
+import { PracticeVoiceSettingsPanel } from "@/components/PracticeVoiceSettingsPanel";
 
 const STORAGE_KEY = "workspace-japanese-practice-v1";
 const MAX_INPUT = 4000;
-const LISTEN_AFTER_SPEAK_MS = 320;
-/** Extra mic deadband while Berry is playing (avoids speaker bleed). */
-const BERRY_SPEAKING_NOISE_FLOOR = 0.15;
 const MAX_CONTEXT_TURNS = 10;
 
 const jpFontClass =
@@ -204,6 +206,10 @@ export function WorkspaceJapanesePracticeSection() {
   const [speechDetected, setSpeechDetected] = useState(false);
   const [speechActiveUi, setSpeechActiveUi] = useState(false);
   const [phraseIncomplete, setPhraseIncomplete] = useState(false);
+  const [voiceSettings, setVoiceSettings] = useState<PracticeVoiceSettings>(() =>
+    loadPracticeVoiceSettings()
+  );
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const practiceMicRef = useRef<PracticeMicSession | null>(null);
@@ -230,6 +236,7 @@ export function WorkspaceJapanesePracticeSection() {
   const speakingIdRef = useRef(speakingId);
   const stopSpeakRef = useRef<(() => void) | null>(null);
   const phaseRef = useRef(phase);
+  const voiceSettingsRef = useRef(voiceSettings);
 
   const isBerryAudioActive = useCallback(() => {
     return (
@@ -253,6 +260,7 @@ export function WorkspaceJapanesePracticeSection() {
   showTranscriptRef.current = showTranscript;
   speakingIdRef.current = speakingId;
   phaseRef.current = phase;
+  voiceSettingsRef.current = voiceSettings;
 
   const interruptBerryIfSpeaking = useCallback(() => {
     if (!practiceSpeakQueueActive() && !speakingIdRef.current) return;
@@ -417,7 +425,8 @@ export function WorkspaceJapanesePracticeSection() {
       {
         stream,
         stopTracksOnRelease: false,
-        noiseFloor: () => (isBerryAudioActive() ? BERRY_SPEAKING_NOISE_FLOOR : 0.032),
+        noiseFloor: () =>
+          isBerryAudioActive() ? voiceSettingsRef.current.berrySpeakingNoiseFloor : 0.032,
       }
     );
     if (!monitor) return false;
@@ -529,7 +538,7 @@ export function WorkspaceJapanesePracticeSection() {
         return;
       }
       beginListeningRef.current?.();
-    }, LISTEN_AFTER_SPEAK_MS);
+    }, voiceSettingsRef.current.listenAfterSpeakMs);
   }, [clearListenRestartTimer]);
 
   const speakMessage = useCallback((messageId: string, text: string, onDone?: () => void) => {
@@ -580,14 +589,16 @@ export function WorkspaceJapanesePracticeSection() {
     setSpeechDetected(false);
     setPhraseIncomplete(false);
 
+    const vs = voiceSettingsRef.current;
     const session = startUtteranceRecognition({
       lang,
       audioTrack: practiceMicRef.current?.track,
-      silenceMs: 650,
-      silenceMsAfterFinal: 220,
-      silenceMsIncomplete: 1850,
-      silenceMsIncompleteAfterFinal: 2200,
-      maxIncompleteWaitMs: 7200,
+      silenceMs: vs.silenceMs,
+      silenceMsAfterFinal: vs.silenceMsAfterFinal,
+      silenceMsIncomplete: vs.silenceMsIncomplete,
+      silenceMsIncompleteAfterFinal: vs.silenceMsIncompleteAfterFinal,
+      maxIncompleteWaitMs: vs.maxIncompleteWaitMs,
+      completePhraseCutoffMs: vs.completePhraseCutoffMs,
       onListening: () => setPhase("listening"),
       onSpeechActivity: bumpSpeechActivity,
       onPhraseIncomplete: () => {
@@ -875,6 +886,22 @@ export function WorkspaceJapanesePracticeSection() {
     else void startVoiceSession();
   }, [voiceSession, stopVoiceSession, startVoiceSession]);
 
+  const onVoiceSettingsChange = useCallback(
+    (next: PracticeVoiceSettings) => {
+      setVoiceSettings(next);
+      if (
+        voiceSessionRef.current &&
+        recognitionRef.current &&
+        !loadingRef.current &&
+        !micMutedRef.current
+      ) {
+        abortListening();
+        beginListeningRef.current?.();
+      }
+    },
+    [abortListening]
+  );
+
   const clearChat = useCallback(() => {
     stopVoiceSession();
     setMessages([]);
@@ -1002,9 +1029,46 @@ export function WorkspaceJapanesePracticeSection() {
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => setShowVoiceSettings((v) => !v)}
+              aria-expanded={showVoiceSettings}
+              aria-label="Voice timing settings"
+              title="Calibrate pause sensitivity"
+              className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400 focus-visible:ring-offset-2 ${
+                showVoiceSettings
+                  ? "border-pink-300 bg-pink-100 text-pink-800"
+                  : "border-stone-200 bg-white text-stone-600 hover:border-pink-200 hover:bg-pink-50 hover:text-pink-700"
+              }`}
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path
+                  d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 5 15.4a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
           </div>
-          {voiceSession && <PhasePill phase={phase} />}
+          <div className="flex items-center gap-2">
+            {voiceSession && <PhasePill phase={phase} />}
+          </div>
         </div>
+
+        {showVoiceSettings && (
+          <div className="border-b border-stone-100 px-4 py-4 sm:px-5">
+            <PracticeVoiceSettingsPanel
+              settings={voiceSettings}
+              onChange={onVoiceSettingsChange}
+              disabled={loading}
+            />
+          </div>
+        )}
 
         <div className="relative bg-gradient-to-b from-rose-50/50 via-white to-white px-4 py-6 sm:px-6 sm:py-8">
           <div

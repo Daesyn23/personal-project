@@ -75,6 +75,8 @@ export type StartUtteranceRecognitionOptions = {
   silenceMsIncompleteAfterFinal?: number;
   /** Force-submit after this much wait while the phrase still looks incomplete (default 3400). */
   maxIncompleteWaitMs?: number;
+  /** Fast cutoff when an end-of-phrase is detected (default 180). */
+  completePhraseCutoffMs?: number;
   onInterim?: (text: string) => void;
   /** Fired when we detect a mid-sentence pause and are waiting for more speech. */
   onPhraseIncomplete?: () => void;
@@ -106,6 +108,7 @@ export function startUtteranceRecognition(
   const silenceMsIncompleteAfterFinal =
     options.silenceMsIncompleteAfterFinal ?? DEFAULT_SILENCE_INCOMPLETE_AFTER_FINAL_MS;
   const maxIncompleteWaitMs = options.maxIncompleteWaitMs ?? DEFAULT_MAX_INCOMPLETE_WAIT_MS;
+  const completePhraseCutoffMs = options.completePhraseCutoffMs ?? COMPLETE_PHRASE_CUTOFF_MS;
   let silenceTimer: ReturnType<typeof setTimeout> | null = null;
   let finalParts: string[] = [];
   let latestInterim = "";
@@ -146,9 +149,9 @@ export function startUtteranceRecognition(
     if (phraseComplete) {
       incompleteWaitAccum = 0;
       if (afterFinal && !latestInterim) {
-        delay = Math.min(silenceMsAfterFinal, COMPLETE_PHRASE_CUTOFF_MS);
+        delay = Math.min(silenceMsAfterFinal, completePhraseCutoffMs);
       } else {
-        delay = Math.min(silenceMs, COMPLETE_PHRASE_CUTOFF_MS + 80);
+        delay = Math.min(silenceMs, completePhraseCutoffMs + 80);
       }
     } else {
       options.onPhraseIncomplete?.();
