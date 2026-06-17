@@ -6,13 +6,13 @@ import { classifyPhraseEnd } from "@/lib/utterance-phrase-end";
 
 export type SpeechInputLang = "ja-JP" | "en-US" | "fil-PH";
 
-const DEFAULT_SILENCE_MS = 550;
-const DEFAULT_SILENCE_AFTER_FINAL_MS = 200;
-const DEFAULT_SILENCE_INCOMPLETE_MS = 1050;
-const DEFAULT_SILENCE_INCOMPLETE_AFTER_FINAL_MS = 1200;
+const DEFAULT_SILENCE_MS = 650;
+const DEFAULT_SILENCE_AFTER_FINAL_MS = 220;
+const DEFAULT_SILENCE_INCOMPLETE_MS = 1850;
+const DEFAULT_SILENCE_INCOMPLETE_AFTER_FINAL_MS = 2200;
 /** When the phrase already looks finished, stop listening this fast (ms). */
-const COMPLETE_PHRASE_CUTOFF_MS = 165;
-const DEFAULT_MAX_INCOMPLETE_WAIT_MS = 3400;
+const COMPLETE_PHRASE_CUTOFF_MS = 180;
+const DEFAULT_MAX_INCOMPLETE_WAIT_MS = 7200;
 const MIN_UTTERANCE_CHARS = 1;
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
@@ -156,7 +156,7 @@ export function startUtteranceRecognition(
       incompleteWaitAccum += delay;
       if (incompleteWaitAccum >= maxIncompleteWaitMs) {
         incompleteWaitAccum = 0;
-        delay = Math.min(silenceMsAfterFinal, 280);
+        delay = Math.min(silenceMsIncomplete, 520);
       }
     }
 

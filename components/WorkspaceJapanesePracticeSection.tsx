@@ -162,7 +162,7 @@ function phaseHeadline(
   if (micMuted) return "Mic off — unmute when you want to talk";
   if (phase === "listening") {
     if (phraseIncomplete && !speechActive) return "Finish your thought — still listening";
-    if (speechActive) return "Keep going — brief pause when done";
+    if (speechActive) return "Keep going — take your time";
     const lang =
       detected !== "unknown" ? ` · ${detectedLanguageLabel(detected)}` : "";
     return `Speak now${lang}`;
@@ -583,10 +583,11 @@ export function WorkspaceJapanesePracticeSection() {
     const session = startUtteranceRecognition({
       lang,
       audioTrack: practiceMicRef.current?.track,
-      silenceMs: 550,
-      silenceMsAfterFinal: 200,
-      silenceMsIncomplete: 1050,
-      silenceMsIncompleteAfterFinal: 1200,
+      silenceMs: 650,
+      silenceMsAfterFinal: 220,
+      silenceMsIncomplete: 1850,
+      silenceMsIncompleteAfterFinal: 2200,
+      maxIncompleteWaitMs: 7200,
       onListening: () => setPhase("listening"),
       onSpeechActivity: bumpSpeechActivity,
       onPhraseIncomplete: () => {

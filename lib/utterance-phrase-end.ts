@@ -57,16 +57,18 @@ export function classifyPhraseEnd(text: string): PhraseEndKind {
     }
   }
 
-  /** Casual Japanese / Taglish question or affirmation enders without explicit 。 */
-  if (/(?:ね|よ|よね|だよ|でしょ|right|ba|no\?|diba)\s*[!?.。]?$/iu.test(t) && charCount >= 4) {
+  /** Casual Japanese / Taglish — only treat as done with clear closure. */
+  if (
+    /(?:ですね|ますね|でしょ|だよね|だね|よね|diba|no\?)\s*[!?.。]?$/iu.test(t) &&
+    charCount >= 6
+  ) {
     return "complete";
   }
 
   /**
-   * No clear ender — treat longer pauses as complete only if substantial
-   * (user likely finished an informal sentence without です).
+   * No clear ender — only auto-finish very long informal runs without a trailing comma.
    */
-  if (charCount >= 18 && !/[、,]$/.test(t)) return "complete";
+  if (charCount >= 36 && !/[、,]$/.test(t)) return "complete";
 
   return "incomplete";
 }
