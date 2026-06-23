@@ -9,7 +9,14 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_BUILD_ID: buildId,
   },
-  serverExternalPackages: ["pdf-parse"],
+  serverExternalPackages: ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"],
+  outputFileTracingIncludes: {
+    "/api/extract-pdf": [
+      "./node_modules/pdf-parse/**/*",
+      "./node_modules/pdfjs-dist/**/*",
+      "./node_modules/@napi-rs/canvas/**/*",
+    ],
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.alias = {
