@@ -59,36 +59,7 @@ function sortCardSetsByName(sets: CardSetRow[]): CardSetRow[] {
   );
 }
 
-export async function listCardSets(): Promise<CardSetRow[]> {
-  const supabase = getSupabaseBrowserClient();
-  if (supabase) {
-    const { data: sets, error } = await supabase.from("card_sets").select("id, name, created_at");
-    if (error) {
-      console.error(error);
-      const store = readLocal();
-      return sortCardSetsByName(
-        store.sets.map((x) => ({
-          ...x,
-          card_count: store.cards.filter((c) => c.set_id === x.id).length,
-        }))
-      );
-    }
-    const { data: fc } = await supabase.from("flashcards").select("set_id");
-    const countMap: Record<string, number> = {};
-    for (const r of fc ?? []) {
-      const sid = r.set_id as string | null;
-      if (!sid) continue;
-      countMap[sid] = (countMap[sid] ?? 0) + 1;
-    }
-    return sortCardSetsByName(
-      (sets ?? []).map((s) => ({
-        id: s.id,
-        name: s.name,
-        created_at: s.created_at,
-        card_count: countMap[s.id] ?? 0,
-      }))
-    );
-  }
+function localCardSetsWithCounts(): CardSetRow[] {
   const store = readLocal();
   return sortCardSetsByName(
     store.sets.map((s) => ({
@@ -96,6 +67,38 @@ export async function listCardSets(): Promise<CardSetRow[]> {
       card_count: store.cards.filter((c) => c.set_id === s.id).length,
     }))
   );
+}
+
+function nestedFlashcardCount(raw: unknown): number {
+  if (!Array.isArray(raw) || raw.length === 0) return 0;
+  const first = raw[0] as { count?: unknown } | null;
+  const n = first?.count;
+  return typeof n === "number" && Number.isFinite(n) ? n : 0;
+}
+
+export async function listCardSets(): Promise<CardSetRow[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (supabase) {
+    // Aggregate count per set (avoids PostgREST's default row cap on a flat select).
+    const { data: sets, error } = await supabase
+      .from("card_sets")
+      .select("id, name, created_at, flashcards(count)");
+    if (error) {
+      console.error(error);
+      return localCardSetsWithCounts();
+    }
+    return sortCardSetsByName(
+      (sets ?? []).map((s) => ({
+        id: s.id as string,
+        name: s.name as string,
+        created_at: s.created_at as string | undefined,
+        card_count: nestedFlashcardCount(
+          (s as { flashcards?: unknown }).flashcards
+        ),
+      }))
+    );
+  }
+  return localCardSetsWithCounts();
 }
 
 export async function createCardSet(name: string): Promise<string> {

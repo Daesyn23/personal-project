@@ -15,6 +15,7 @@ import { WorkspaceGoogleSheetSection } from "@/components/WorkspaceGoogleSheetSe
 import { WorkspaceTimerSection } from "@/components/WorkspaceTimerSection";
 import { WorkspaceJapaneseGrammarSection } from "@/components/WorkspaceJapaneseGrammarSection";
 import { WorkspaceJapanesePracticeSection } from "@/components/WorkspaceJapanesePracticeSection";
+import { WorkspaceGamesSection } from "@/components/WorkspaceGamesSection";
 import { WorkspaceReviewSection } from "@/components/WorkspaceReviewSection";
 import { WorkspaceLessonDashboard } from "@/components/WorkspaceLessonDashboard";
 import { WorkspaceLessonPlanSection } from "@/components/WorkspaceLessonPlanSection";
@@ -54,6 +55,7 @@ type WorkspaceArea =
   | "translate"
   | "grammar"
   | "japanesePractice"
+  | "games"
   | "youtube"
   | "lessonPlan";
 
@@ -68,6 +70,7 @@ const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
   { id: "translate", label: "Translate" },
   { id: "grammar", label: "Grammar" },
   { id: "japanesePractice", label: "Practice" },
+  { id: "games", label: "Games" },
   { id: "youtube", label: "Video Lessons" },
   { id: "lessonPlan", label: "Lesson plan" },
 ];
@@ -137,6 +140,7 @@ export default function HomePage() {
       workspaceArea === "translate" ||
       workspaceArea === "grammar" ||
       workspaceArea === "japanesePractice" ||
+      workspaceArea === "games" ||
       workspaceArea === "review" ||
       workspaceArea === "youtube" ||
       workspaceArea === "lessonPlan" ||
@@ -385,6 +389,13 @@ export default function HomePage() {
           <WorkspaceJapaneseGrammarSection />
         ) : workspaceArea === "japanesePractice" ? (
           <WorkspaceJapanesePracticeSection />
+        ) : workspaceArea === "games" ? (
+          <WorkspaceGamesSection
+            sets={sets}
+            loaded={loaded}
+            preferredSetId={activeSetId}
+            loadCards={listFlashcardsInSet}
+          />
         ) : workspaceArea === "review" ? (
           <WorkspaceReviewSection />
         ) : workspaceArea === "youtube" ? (
@@ -407,7 +418,10 @@ export default function HomePage() {
               >
                 <button
                   type="button"
-                  onClick={() => setActiveSetId(null)}
+                  onClick={() => {
+                    setActiveSetId(null);
+                    void refresh();
+                  }}
                   className="rounded-full px-3 py-1.5 font-medium text-pink-700 transition hover:bg-pink-50"
                 >
                   ← All sets

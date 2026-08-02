@@ -13,6 +13,7 @@ export type WorkspaceNavigateArea =
   | "translate"
   | "grammar"
   | "japanesePractice"
+  | "games"
   | "youtube"
   | "lessonPlan";
 
