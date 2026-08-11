@@ -9,6 +9,25 @@ export type GoogleSheetValueRange = {
   values: string[][];
 };
 
+export type GoogleSheetLoadGuard = {
+  requestId: number;
+  latestRequestId: number;
+  revisionAtStart: number;
+  currentRevision: number;
+  pendingEditCount: number;
+  saving: boolean;
+};
+
+/** Prevents a delayed or stale server response from replacing local cell edits. */
+export function shouldApplyGoogleSheetLoad(guard: GoogleSheetLoadGuard): boolean {
+  return (
+    guard.requestId === guard.latestRequestId &&
+    guard.revisionAtStart === guard.currentRevision &&
+    guard.pendingEditCount === 0 &&
+    !guard.saving
+  );
+}
+
 function columnIndexFromLabel(label: string): number {
   let value = 0;
   for (const char of label.toUpperCase()) {

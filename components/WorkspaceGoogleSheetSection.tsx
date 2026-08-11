@@ -10,7 +10,10 @@ import { createPortal } from "react-dom";
 import { HeadingWithInfo } from "@/components/InfoTip";
 import { SavedGoogleSheetCard } from "@/components/SavedGoogleSheetCard";
 import { emptyCellPayload, type SheetCellPayload } from "@/lib/google-sheets-grid-parse";
-import type { GoogleSheetCellUpdate } from "@/lib/google-sheets-cell-updates";
+import {
+  shouldApplyGoogleSheetLoad,
+  type GoogleSheetCellUpdate,
+} from "@/lib/google-sheets-cell-updates";
 import {
   DEFAULT_SHEETS_CELL_RANGE,
   defaultLabelForInput,
@@ -379,6 +382,8 @@ export function WorkspaceGoogleSheetSection() {
   const idleGoogleSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
   const pendingCellEditsRef = useRef<Map<string, GoogleSheetCellUpdate>>(new Map());
+  const sheetEditRevisionRef = useRef(0);
+  const sheetLoadRequestIdRef = useRef(0);
   const [cloudApplyEpoch, setCloudApplyEpoch] = useState(0);
   const collectArgsRef = useRef<CollectSheetsStateArgs>({
     activeSpreadsheetId: null,
@@ -600,6 +605,8 @@ export function WorkspaceGoogleSheetSection() {
   const loadFromServer = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!spreadsheetId) return;
+      const requestId = ++sheetLoadRequestIdRef.current;
+      const revisionAtStart = sheetEditRevisionRef.current;
       const silent = opts?.silent ?? false;
       if (!silent) setLoading(true);
       else setSubtleSync(true);
@@ -649,6 +656,18 @@ export function WorkspaceGoogleSheetSection() {
           );
           throw new Error(data.error || "Could not load sheet");
         }
+        if (
+          !shouldApplyGoogleSheetLoad({
+            requestId,
+            latestRequestId: sheetLoadRequestIdRef.current,
+            revisionAtStart,
+            currentRevision: sheetEditRevisionRef.current,
+            pendingEditCount: pendingCellEditsRef.current.size,
+            saving: savingRef.current,
+          })
+        ) {
+          return;
+        }
         setSuggestGoogleReauth(false);
         const raw = data.values ?? [];
         const capped = raw.slice(0, MAX_ROWS).map((row) => row.slice(0, MAX_COLS));
@@ -673,11 +692,19 @@ export function WorkspaceGoogleSheetSection() {
         pendingCellEditsRef.current.clear();
         setDirty(false);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Load failed");
-        setSheetMerges([]);
+        if (
+          requestId === sheetLoadRequestIdRef.current &&
+          revisionAtStart === sheetEditRevisionRef.current &&
+          pendingCellEditsRef.current.size === 0
+        ) {
+          setError(e instanceof Error ? e.message : "Load failed");
+          setSheetMerges([]);
+        }
       } finally {
-        setLoading(false);
-        setSubtleSync(false);
+        if (requestId === sheetLoadRequestIdRef.current) {
+          setLoading(false);
+          setSubtleSync(false);
+        }
       }
     },
     [spreadsheetId, selectedSheetId, sheetGid, importFormatting]
@@ -1067,6 +1094,7 @@ export function WorkspaceGoogleSheetSection() {
   );
 
   const setCell = (r: number, c: number, v: string) => {
+    sheetEditRevisionRef.current += 1;
     pendingCellEditsRef.current.set(`${r}:${c}`, {
       rowIndex: r,
       columnIndex: c,
@@ -1209,6 +1237,7 @@ export function WorkspaceGoogleSheetSection() {
         throw new Error(data.error || "Save failed");
       }
       setSuggestGoogleReauth(false);
+      sheetEditRevisionRef.current += 1;
       for (const saved of updates) {
         const key = `${saved.rowIndex}:${saved.columnIndex}`;
         const current = pendingCellEditsRef.current.get(key);
@@ -1275,6 +1304,9 @@ export function WorkspaceGoogleSheetSection() {
       if (!window.confirm("You have unsaved edits. Discard them and reload from Google Sheets?")) {
         return;
       }
+      sheetEditRevisionRef.current += 1;
+      pendingCellEditsRef.current.clear();
+      setDirty(false);
     }
     void loadFromServer({ silent: false });
   };
@@ -1309,6 +1341,7 @@ export function WorkspaceGoogleSheetSection() {
     setActiveLinkId(null);
     setSpreadsheetInput("");
     setRange(DEFAULT_RANGE);
+    sheetEditRevisionRef.current += 1;
     pendingCellEditsRef.current.clear();
     setDirty(false);
     setError(null);
@@ -1400,6 +1433,7 @@ export function WorkspaceGoogleSheetSection() {
       setSpreadsheetInput(L.spreadsheetInput);
       setRange(L.range || DEFAULT_RANGE);
       setImportFormatting(L.importFormatting ?? true);
+      sheetEditRevisionRef.current += 1;
       pendingCellEditsRef.current.clear();
       setDirty(false);
       setError(null);
@@ -1429,6 +1463,7 @@ export function WorkspaceGoogleSheetSection() {
         setActiveLinkId(null);
         setSpreadsheetInput("");
         setRange(DEFAULT_RANGE);
+        sheetEditRevisionRef.current += 1;
         pendingCellEditsRef.current.clear();
         setDirty(false);
         setError(null);
@@ -1488,6 +1523,7 @@ export function WorkspaceGoogleSheetSection() {
       setSpreadsheetInput(entry.spreadsheetInput);
       setRange(entry.range);
       setImportFormatting(true);
+      sheetEditRevisionRef.current += 1;
       pendingCellEditsRef.current.clear();
       setDirty(false);
       setError(null);
@@ -1810,6 +1846,15 @@ export function WorkspaceGoogleSheetSection() {
                       value={selectedSheetId == null ? "" : String(selectedSheetId)}
                       onChange={(e) => {
                         const v = e.target.value;
+                        if (dirty) {
+                          const discard = window.confirm(
+                            "You have unsaved cell edits. Discard them and switch sheet tabs?"
+                          );
+                          if (!discard) return;
+                          sheetEditRevisionRef.current += 1;
+                          pendingCellEditsRef.current.clear();
+                          setDirty(false);
+                        }
                         if (v === "") {
                           setSelectedSheetId(null);
                           return;
@@ -2063,8 +2108,13 @@ export function WorkspaceGoogleSheetSection() {
                           <div
                             key={ci}
                             role="columnheader"
-                            className="relative box-border overflow-hidden border-t border-b border-r border-neutral-200/80 bg-clip-padding px-2 py-1.5 text-center first:border-l first:border-neutral-200/80"
+                            className="relative box-border cursor-[context-menu] overflow-hidden border-t border-b border-r border-neutral-200/80 bg-clip-padding px-2 py-1.5 text-center first:border-l first:border-neutral-200/80"
                             style={cellStyle}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              openFreezeColumnMenu(e, ci);
+                            }}
                           >
                             <span
                               className={`inline-flex min-h-[1.75rem] min-w-[2rem] cursor-[context-menu] select-none items-center justify-center rounded-md px-2 py-1 font-mono text-[11px] font-bold ${
@@ -2091,6 +2141,7 @@ export function WorkspaceGoogleSheetSection() {
                               onContextMenu={(ev) => {
                                 ev.preventDefault();
                                 ev.stopPropagation();
+                                openFreezeColumnMenu(ev, ci);
                               }}
                             />
                           </div>
