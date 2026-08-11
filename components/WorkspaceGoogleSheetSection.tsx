@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import { HeadingWithInfo } from "@/components/InfoTip";
 import { SavedGoogleSheetCard } from "@/components/SavedGoogleSheetCard";
 import { emptyCellPayload, type SheetCellPayload } from "@/lib/google-sheets-grid-parse";
+import type { GoogleSheetCellUpdate } from "@/lib/google-sheets-cell-updates";
 import {
   DEFAULT_SHEETS_CELL_RANGE,
   defaultLabelForInput,
@@ -377,6 +378,7 @@ export function WorkspaceGoogleSheetSection() {
   const cloudPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleGoogleSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
+  const pendingCellEditsRef = useRef<Map<string, GoogleSheetCellUpdate>>(new Map());
   const [cloudApplyEpoch, setCloudApplyEpoch] = useState(0);
   const collectArgsRef = useRef<CollectSheetsStateArgs>({
     activeSpreadsheetId: null,
@@ -668,6 +670,7 @@ export function WorkspaceGoogleSheetSection() {
         );
         setSelectedCell(null);
         setLastSynced(new Date());
+        pendingCellEditsRef.current.clear();
         setDirty(false);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Load failed");
@@ -1064,6 +1067,11 @@ export function WorkspaceGoogleSheetSection() {
   );
 
   const setCell = (r: number, c: number, v: string) => {
+    pendingCellEditsRef.current.set(`${r}:${c}`, {
+      rowIndex: r,
+      columnIndex: c,
+      value: v,
+    });
     setValues((prev) => {
       const next = prev.map((row) => [...row]);
       if (!next[r]) return prev;
@@ -1122,7 +1130,6 @@ export function WorkspaceGoogleSheetSection() {
       const cols = prev.length ? prev[0].length : 6;
       return [...prev, Array.from({ length: cols }, () => emptyCellPayload())];
     });
-    setDirty(true);
   };
 
   const addColumn = () => {
@@ -1134,21 +1141,28 @@ export function WorkspaceGoogleSheetSection() {
       if (prev.length === 0) return emptyMetaGrid(1, 1);
       return prev.map((row) => [...row, emptyCellPayload()]);
     });
-    setDirty(true);
   };
 
   const removeLastRow = () => {
     if (values.length <= 1) return;
+    const removedRowIndex = values.length - 1;
+    for (const [key, update] of pendingCellEditsRef.current) {
+      if (update.rowIndex >= removedRowIndex) pendingCellEditsRef.current.delete(key);
+    }
     setValues((prev) => prev.slice(0, -1));
     setCellMeta((prev) => prev.slice(0, -1));
-    setDirty(true);
+    setDirty(pendingCellEditsRef.current.size > 0);
   };
 
   const removeLastColumn = () => {
     if (colCount <= 1) return;
+    const removedColumnIndex = colCount - 1;
+    for (const [key, update] of pendingCellEditsRef.current) {
+      if (update.columnIndex >= removedColumnIndex) pendingCellEditsRef.current.delete(key);
+    }
     setValues((prev) => prev.map((row) => row.slice(0, -1)));
     setCellMeta((prev) => prev.map((row) => row.slice(0, -1)));
-    setDirty(true);
+    setDirty(pendingCellEditsRef.current.size > 0);
   };
 
   const saveToGoogle = useCallback(async () => {
@@ -1158,6 +1172,11 @@ export function WorkspaceGoogleSheetSection() {
     setSaving(true);
     setError(null);
     try {
+      const updates = Array.from(pendingCellEditsRef.current.values());
+      if (updates.length === 0) {
+        setDirty(false);
+        return;
+      }
       const norm = normalizeSheetsA1Range(range.trim() || DEFAULT_RANGE);
       const needsGid = !norm.includes("!");
       const gid = selectedSheetId ?? sheetGid;
@@ -1167,7 +1186,7 @@ export function WorkspaceGoogleSheetSection() {
         body: JSON.stringify({
           spreadsheetId,
           range: range.trim() || DEFAULT_RANGE,
-          values,
+          updates,
           ...(needsGid && gid != null ? { gid } : {}),
         }),
       });
@@ -1190,7 +1209,12 @@ export function WorkspaceGoogleSheetSection() {
         throw new Error(data.error || "Save failed");
       }
       setSuggestGoogleReauth(false);
-      setDirty(false);
+      for (const saved of updates) {
+        const key = `${saved.rowIndex}:${saved.columnIndex}`;
+        const current = pendingCellEditsRef.current.get(key);
+        if (current?.value === saved.value) pendingCellEditsRef.current.delete(key);
+      }
+      setDirty(pendingCellEditsRef.current.size > 0);
       setLastSynced(new Date());
       setLastSaveAt(new Date());
       setSaveFlash(true);
@@ -1201,7 +1225,7 @@ export function WorkspaceGoogleSheetSection() {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [spreadsheetId, range, selectedSheetId, sheetGid, values]);
+  }, [spreadsheetId, range, selectedSheetId, sheetGid]);
 
   useEffect(() => {
     const saveDisabled =
@@ -1285,6 +1309,7 @@ export function WorkspaceGoogleSheetSection() {
     setActiveLinkId(null);
     setSpreadsheetInput("");
     setRange(DEFAULT_RANGE);
+    pendingCellEditsRef.current.clear();
     setDirty(false);
     setError(null);
     setFormatWarning(null);
@@ -1375,6 +1400,7 @@ export function WorkspaceGoogleSheetSection() {
       setSpreadsheetInput(L.spreadsheetInput);
       setRange(L.range || DEFAULT_RANGE);
       setImportFormatting(L.importFormatting ?? true);
+      pendingCellEditsRef.current.clear();
       setDirty(false);
       setError(null);
       setFormatWarning(null);
@@ -1403,6 +1429,7 @@ export function WorkspaceGoogleSheetSection() {
         setActiveLinkId(null);
         setSpreadsheetInput("");
         setRange(DEFAULT_RANGE);
+        pendingCellEditsRef.current.clear();
         setDirty(false);
         setError(null);
         setFormatWarning(null);
@@ -1461,6 +1488,7 @@ export function WorkspaceGoogleSheetSection() {
       setSpreadsheetInput(entry.spreadsheetInput);
       setRange(entry.range);
       setImportFormatting(true);
+      pendingCellEditsRef.current.clear();
       setDirty(false);
       setError(null);
       setFormatWarning(null);

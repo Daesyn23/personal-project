@@ -5,6 +5,10 @@ import { finalizeParsedGrid } from "@/lib/google-sheets-grid-parse";
 import { localizeSheetMerges } from "@/lib/sheet-merge-localize";
 import { resolveSheetsValuesRange } from "@/lib/google-sheets-resolve-range";
 import { spreadsheetIdLooksIncomplete } from "@/lib/sheets-a1";
+import {
+  buildGoogleSheetCellValueRanges,
+  type GoogleSheetCellUpdate,
+} from "@/lib/google-sheets-cell-updates";
 
 export const runtime = "nodejs";
 
@@ -120,7 +124,7 @@ export async function GET(req: NextRequest) {
 type PostBody = {
   spreadsheetId?: string;
   range?: string;
-  values?: string[][];
+  updates?: GoogleSheetCellUpdate[];
   gid?: number | null;
 };
 
@@ -135,7 +139,7 @@ export async function POST(req: NextRequest) {
         : typeof body.gid === "number" && Number.isFinite(body.gid)
           ? body.gid
           : parseGidParam(String(body.gid));
-    const values = body.values;
+    const updates = body.updates;
 
     if (!spreadsheetId) {
       return NextResponse.json(
@@ -152,11 +156,20 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    if (!Array.isArray(values)) {
+    if (!Array.isArray(updates)) {
       return NextResponse.json(
-        { error: "Missing values array in body." },
+        { error: "Missing cell updates array in body." },
         { status: 400 }
       );
+    }
+    if (updates.length > 5000) {
+      return NextResponse.json(
+        { error: "Too many cell updates in one save." },
+        { status: 400 }
+      );
+    }
+    if (updates.length === 0) {
+      return NextResponse.json({ ok: true, updatedCells: 0 });
     }
 
     const range = await resolveSheetsValuesRange({
@@ -165,15 +178,17 @@ export async function POST(req: NextRequest) {
       gid,
     });
 
+    const data = buildGoogleSheetCellValueRanges(range, updates);
     const sheets = await getSheetsClient();
-    await sheets.spreadsheets.values.update({
+    await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId,
-      range,
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values },
+      requestBody: {
+        valueInputOption: "USER_ENTERED",
+        data,
+      },
     });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, updatedCells: data.length });
   } catch (e) {
     console.error(e);
     const message = e instanceof Error ? e.message : "Failed to update sheet";
