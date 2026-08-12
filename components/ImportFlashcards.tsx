@@ -6,8 +6,9 @@ import {
   looksLikeNumberedLessonPaste,
   parseLessonLinesPaste,
 } from "@/lib/parse-pasted-lesson-lines";
-import type { FlashcardDraft } from "@/lib/types";
+import type { FlashcardDraft, FlashcardSetLevel } from "@/lib/types";
 import { HeadingWithInfo, InfoTip } from "@/components/InfoTip";
+import { FLASHCARD_SET_LEVELS } from "@/lib/flashcard-set-level";
 import { addCardsToSet, createCardSet } from "@/lib/flashcards-repo";
 
 type Props = {
@@ -40,6 +41,7 @@ export function ImportFlashcards({ onImported }: Props) {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [setName, setSetName] = useState("");
+  const [jlptLevel, setJlptLevel] = useState<FlashcardSetLevel | "">("");
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [lessonPaste, setLessonPaste] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +54,7 @@ export function ImportFlashcards({ onImported }: Props) {
     setRows([]);
     setLessonPaste("");
     setSetName("");
+    setJlptLevel("");
     setError(null);
     setVerificationNote(null);
     setImageAnalyzing(false);
@@ -235,6 +238,10 @@ export function ImportFlashcards({ onImported }: Props) {
       setError("Enter a name for this set.");
       return;
     }
+    if (!jlptLevel) {
+      setError("Select N5, N4, or N3 for this set.");
+      return;
+    }
     if (rows.length === 0) {
       setError("Add at least one card (paste lesson lines, choose a file, or fill the table).");
       return;
@@ -253,7 +260,7 @@ export function ImportFlashcards({ onImported }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const setId = await createCardSet(name);
+      const setId = await createCardSet(name, jlptLevel);
       await addCardsToSet(setId, payload);
       closeModal();
       onImported(setId);
@@ -324,6 +331,23 @@ export function ImportFlashcards({ onImported }: Props) {
                   placeholder="e.g. Lesson 18 Vocabulary"
                   className="w-full rounded-lg border border-pink-200 bg-[#fffafc] px-3 py-2 text-sm outline-none ring-pink-300 focus:ring-2 sm:max-w-md"
                 />
+                <label className="sr-only" htmlFor="import-set-level">
+                  JLPT level tag
+                </label>
+                <select
+                  id="import-set-level"
+                  value={jlptLevel}
+                  onChange={(e) => setJlptLevel(e.target.value as FlashcardSetLevel | "")}
+                  className="w-full rounded-lg border border-pink-200 bg-[#fffafc] px-3 py-2 text-sm outline-none ring-pink-300 focus:ring-2 sm:w-auto"
+                  title="JLPT level tag"
+                >
+                  <option value="">Select JLPT level</option>
+                  {FLASHCARD_SET_LEVELS.map((level) => (
+                    <option key={level.value} value={level.value}>
+                      {level.label}
+                    </option>
+                  ))}
+                </select>
                 <input
                   ref={inputRef}
                   type="file"
@@ -492,7 +516,7 @@ export function ImportFlashcards({ onImported }: Props) {
               </button>
               <button
                 type="button"
-                disabled={busy || imageAnalyzing || rows.length === 0 || !setName.trim()}
+                disabled={busy || imageAnalyzing || rows.length === 0 || !setName.trim() || !jlptLevel}
                 onClick={save}
                 className="rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50"
               >

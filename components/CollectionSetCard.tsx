@@ -1,6 +1,7 @@
 "use client";
 
 import type { CardSetRow } from "@/lib/types";
+import { flashcardSetLevelLabel } from "@/lib/flashcard-set-level";
 
 type Props = {
   collection: CardSetRow;
@@ -59,6 +60,7 @@ function DeckStackDecoration({ className }: { className?: string }) {
 
 export function CollectionSetCard({ collection, onOpen, onRename, onDelete }: Props) {
   const count = collection.card_count ?? 0;
+  const levelLabel = flashcardSetLevelLabel(collection.jlpt_level);
   const accent = accentIndex(collection.id);
   const glow = ACCENT_GLOWS[accent];
 
@@ -91,9 +93,16 @@ export function CollectionSetCard({ collection, onOpen, onRename, onDelete }: Pr
             onClick={onOpen}
             className="min-w-0 flex-1 rounded-lg text-left transition hover:bg-pink-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400/90"
           >
-            <h3 className="text-lg font-semibold leading-snug tracking-tight text-neutral-900 line-clamp-2 group-hover:text-pink-700">
-              {collection.name}
-            </h3>
+            <div className="flex flex-wrap items-center gap-2">
+              {levelLabel && (
+                <span className="inline-flex shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-[0.68rem] font-bold tracking-wide text-violet-700 ring-1 ring-violet-200/80">
+                  {levelLabel}
+                </span>
+              )}
+              <h3 className="min-w-0 text-lg font-semibold leading-snug tracking-tight text-neutral-900 line-clamp-2 group-hover:text-pink-700">
+                {collection.name}
+              </h3>
+            </div>
             <p className="mt-1.5 text-sm text-neutral-500">Tap to open this set</p>
           </button>
           <div className="flex shrink-0 items-center gap-0.5">
@@ -105,8 +114,8 @@ export function CollectionSetCard({ collection, onOpen, onRename, onDelete }: Pr
                 onRename();
               }}
               className="rounded-lg p-2 text-pink-500/90 transition hover:bg-pink-50 hover:text-pink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
-              title="Rename collection"
-              aria-label={`Rename collection ${collection.name}`}
+              title="Edit collection name and level"
+              aria-label={`Edit collection ${collection.name}`}
             >
               <PencilIcon className="h-5 w-5" />
             </button>

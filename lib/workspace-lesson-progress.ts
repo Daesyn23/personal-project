@@ -1,4 +1,5 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { clampLessonToLevel } from "@/lib/jlpt-lesson-range";
 import type { JlptPlaylistKey } from "@/lib/youtube-jlpt-playlists";
 
 const LOCAL_KEY = "workspace-lesson-progress-v1";
@@ -11,7 +12,7 @@ export type LessonProgress = {
 };
 
 const DEFAULT_PROGRESS: LessonProgress = {
-  lessonNumber: 1,
+  lessonNumber: 26,
   jlptLevel: "n4",
   updatedAt: new Date(0).toISOString(),
 };
@@ -28,9 +29,10 @@ function readLocal(): LessonProgress {
     if (!raw) return DEFAULT_PROGRESS;
     const o = JSON.parse(raw) as Record<string, unknown>;
     const lessonNumber = typeof o.lessonNumber === "number" ? o.lessonNumber : 1;
+    const jlptLevel = normalizeJlptLevel(o.jlptLevel);
     return {
-      lessonNumber: lessonNumber > 0 ? Math.floor(lessonNumber) : 1,
-      jlptLevel: normalizeJlptLevel(o.jlptLevel),
+      lessonNumber: clampLessonToLevel(jlptLevel, lessonNumber),
+      jlptLevel,
       updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : DEFAULT_PROGRESS.updatedAt,
     };
   } catch {
@@ -64,12 +66,13 @@ export async function loadLessonProgress(): Promise<LessonProgress> {
     return local;
   }
 
+  const remoteLevel = normalizeJlptLevel(data.jlpt_level);
   const remote: LessonProgress = {
-    lessonNumber:
-      typeof data.lesson_number === "number" && data.lesson_number > 0
-        ? data.lesson_number
-        : 1,
-    jlptLevel: normalizeJlptLevel(data.jlpt_level),
+    lessonNumber: clampLessonToLevel(
+      remoteLevel,
+      typeof data.lesson_number === "number" ? data.lesson_number : Number.NaN
+    ),
+    jlptLevel: remoteLevel,
     updatedAt:
       typeof data.updated_at === "string" ? data.updated_at : new Date().toISOString(),
   };
@@ -84,9 +87,10 @@ export async function loadLessonProgress(): Promise<LessonProgress> {
 }
 
 export async function saveLessonProgress(progress: LessonProgress): Promise<LessonProgress> {
+  const jlptLevel = normalizeJlptLevel(progress.jlptLevel);
   const next: LessonProgress = {
-    lessonNumber: Math.max(1, Math.floor(progress.lessonNumber)),
-    jlptLevel: normalizeJlptLevel(progress.jlptLevel),
+    lessonNumber: clampLessonToLevel(jlptLevel, progress.lessonNumber),
+    jlptLevel,
     updatedAt: new Date().toISOString(),
   };
   writeLocal(next);

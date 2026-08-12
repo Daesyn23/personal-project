@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { HeadingWithInfo } from "@/components/InfoTip";
-import { updateCardSetName } from "@/lib/flashcards-repo";
-import type { CardSetRow } from "@/lib/types";
+import { FLASHCARD_SET_LEVELS } from "@/lib/flashcard-set-level";
+import { updateCardSetDetails } from "@/lib/flashcards-repo";
+import type { CardSetRow, FlashcardSetLevel } from "@/lib/types";
 
 type Props = {
   collection: CardSetRow | null;
@@ -13,12 +14,14 @@ type Props = {
 
 export function RenameCollectionModal({ collection, onClose, onSaved }: Props) {
   const [name, setName] = useState("");
+  const [jlptLevel, setJlptLevel] = useState<FlashcardSetLevel | "">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (collection) {
       setName(collection.name);
+      setJlptLevel(collection.jlpt_level ?? "");
       setError(null);
     }
   }, [collection]);
@@ -31,10 +34,14 @@ export function RenameCollectionModal({ collection, onClose, onSaved }: Props) {
       setError("Enter a name.");
       return;
     }
+    if (!jlptLevel) {
+      setError("Select N5, N4, or N3 for this collection.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await updateCardSetName(collection.id, trimmed);
+      await updateCardSetDetails(collection.id, trimmed, jlptLevel);
       onSaved();
       onClose();
     } catch (e) {
@@ -55,14 +62,14 @@ export function RenameCollectionModal({ collection, onClose, onSaved }: Props) {
         <div className="border-b border-pink-100 px-5 py-4">
           <HeadingWithInfo
             align="center"
-            infoLabel="Rename collection"
+            infoLabel="Edit collection"
             heading={
               <h2 id="rename-collection-title" className="text-lg font-semibold text-neutral-900">
-                Rename collection
+                Edit collection
               </h2>
             }
           >
-            This name appears in your list and breadcrumb.
+            The name appears in your list; the level tag keeps repeated lesson numbers distinct.
           </HeadingWithInfo>
         </div>
         <div className="p-5">
@@ -80,6 +87,24 @@ export function RenameCollectionModal({ collection, onClose, onSaved }: Props) {
               maxLength={200}
             />
           </label>
+          <label className="mt-4 block text-xs font-medium text-neutral-600">
+            JLPT level tag
+            <select
+              value={jlptLevel}
+              onChange={(e) => setJlptLevel(e.target.value as FlashcardSetLevel | "")}
+              className="mt-1.5 w-full rounded-lg border border-pink-100 bg-[#fffafc] px-3 py-2.5 text-sm text-neutral-900"
+            >
+              <option value="">Select a JLPT level</option>
+              {FLASHCARD_SET_LEVELS.map((level) => (
+                <option key={level.value} value={level.value}>
+                  {level.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">
+            The selected level is saved with this collection in the database.
+          </p>
           {error && (
             <p className="mt-2 text-sm text-red-600" role="alert">
               {error}
@@ -96,7 +121,7 @@ export function RenameCollectionModal({ collection, onClose, onSaved }: Props) {
           </button>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || !jlptLevel}
             onClick={() => void save()}
             className="rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50"
           >

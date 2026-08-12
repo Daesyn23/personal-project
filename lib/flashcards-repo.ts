@@ -1,5 +1,5 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { CardSetRow, FlashcardDraft, FlashcardRow } from "@/lib/types";
+import type { CardSetRow, FlashcardDraft, FlashcardRow, FlashcardSetLevel } from "@/lib/types";
 
 const LOCAL_KEY = "flashcard-presentation:v2";
 
@@ -30,7 +30,7 @@ function readLocal(): LocalStore {
             teacher_research: (c as FlashcardRow).teacher_research ?? null,
           }));
           const store: LocalStore = {
-            sets: [{ id: sid, name, created_at: new Date().toISOString() }],
+            sets: [{ id: sid, name, jlpt_level: null, created_at: new Date().toISOString() }],
             cards: migrated,
           };
           localStorage.setItem(LOCAL_KEY, JSON.stringify(store));
@@ -64,6 +64,7 @@ function localCardSetsWithCounts(): CardSetRow[] {
   return sortCardSetsByName(
     store.sets.map((s) => ({
       ...s,
+      jlpt_level: s.jlpt_level ?? null,
       card_count: store.cards.filter((c) => c.set_id === s.id).length,
     }))
   );
@@ -82,7 +83,7 @@ export async function listCardSets(): Promise<CardSetRow[]> {
     // Aggregate count per set (avoids PostgREST's default row cap on a flat select).
     const { data: sets, error } = await supabase
       .from("card_sets")
-      .select("id, name, created_at, flashcards(count)");
+      .select("id, name, jlpt_level, created_at, flashcards(count)");
     if (error) {
       console.error(error);
       return localCardSetsWithCounts();
@@ -91,6 +92,7 @@ export async function listCardSets(): Promise<CardSetRow[]> {
       (sets ?? []).map((s) => ({
         id: s.id as string,
         name: s.name as string,
+        jlpt_level: (s.jlpt_level as FlashcardSetLevel | null) ?? null,
         created_at: s.created_at as string | undefined,
         card_count: nestedFlashcardCount(
           (s as { flashcards?: unknown }).flashcards
@@ -101,7 +103,10 @@ export async function listCardSets(): Promise<CardSetRow[]> {
   return localCardSetsWithCounts();
 }
 
-export async function createCardSet(name: string): Promise<string> {
+export async function createCardSet(
+  name: string,
+  jlptLevel: FlashcardSetLevel
+): Promise<string> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Set name is required");
 
@@ -109,20 +114,12 @@ export async function createCardSet(name: string): Promise<string> {
   if (supabase) {
     const { data, error } = await supabase
       .from("card_sets")
-      .insert({ name: trimmed })
+      .insert({ name: trimmed, jlpt_level: jlptLevel })
       .select("id")
       .single();
     if (error) {
       console.error(error);
-      const id = crypto.randomUUID();
-      const store = readLocal();
-      store.sets.unshift({
-        id,
-        name: trimmed,
-        created_at: new Date().toISOString(),
-      });
-      writeLocal(store);
-      return id;
+      throw new Error("Could not save the collection to the database.");
     }
     return data!.id as string;
   }
@@ -131,35 +128,37 @@ export async function createCardSet(name: string): Promise<string> {
   store.sets.unshift({
     id,
     name: trimmed,
+    jlpt_level: jlptLevel,
     created_at: new Date().toISOString(),
   });
   writeLocal(store);
   return id;
 }
 
-export async function updateCardSetName(setId: string, name: string): Promise<void> {
+export async function updateCardSetDetails(
+  setId: string,
+  name: string,
+  jlptLevel: FlashcardSetLevel
+): Promise<void> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Name is required");
 
   const supabase = getSupabaseBrowserClient();
   if (supabase) {
-    const { error } = await supabase.from("card_sets").update({ name: trimmed }).eq("id", setId);
+    const { error } = await supabase
+      .from("card_sets")
+      .update({ name: trimmed, jlpt_level: jlptLevel })
+      .eq("id", setId);
     if (error) {
       console.error(error);
-      const store = readLocal();
-      const idx = store.sets.findIndex((s) => s.id === setId);
-      if (idx >= 0) {
-        store.sets[idx] = { ...store.sets[idx], name: trimmed };
-        writeLocal(store);
-      }
-      throw error;
+      throw new Error("Could not save the collection changes to the database.");
     }
     return;
   }
   const store = readLocal();
   const idx = store.sets.findIndex((s) => s.id === setId);
   if (idx >= 0) {
-    store.sets[idx] = { ...store.sets[idx], name: trimmed };
+    store.sets[idx] = { ...store.sets[idx], name: trimmed, jlpt_level: jlptLevel };
     writeLocal(store);
   }
 }

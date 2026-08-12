@@ -1,6 +1,10 @@
+export type FlashcardSetLevel = "n5" | "n4" | "n3";
+
 export type CardSetRow = {
   id: string;
   name: string;
+  /** Optional JLPT tag. Kept separate from the display name so lesson numbers may repeat by level. */
+  jlpt_level: FlashcardSetLevel | null;
   created_at?: string;
   card_count?: number;
 };

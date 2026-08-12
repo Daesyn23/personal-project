@@ -49,10 +49,42 @@ function findLessonFolder(folders: WorkspaceFolderRow[], lessonNumber: number): 
   return folders.find((f) => matchesLessonNumber(f.name, lessonNumber)) ?? null;
 }
 
-function findFlashcardSet(sets: CardSetRow[], lessonNumber: number): CardSetRow | null {
-  const exact = sets.find((s) => s.name.trim() === lessonVocabularySetName(lessonNumber));
-  if (exact) return exact;
-  return sets.find((s) => matchesLessonNumber(s.name, lessonNumber)) ?? null;
+function levelMentionedInName(name: string): JlptPlaylistKey | null {
+  const match = name.match(/\bN([345])\b/i);
+  return match ? (`n${match[1]}`.toLowerCase() as JlptPlaylistKey) : null;
+}
+
+function findFlashcardSet(
+  sets: CardSetRow[],
+  lessonNumber: number,
+  jlptLevel: JlptPlaylistKey
+): CardSetRow | null {
+  const lessonSets = sets.filter((s) => matchesLessonNumber(s.name, lessonNumber));
+
+  // The separate tag is authoritative and permits identical display names.
+  const tagged = lessonSets.find((s) => s.jlpt_level === jlptLevel);
+  if (tagged) return tagged;
+
+  // Keep explicitly prefixed legacy names such as "N3 Lesson 1" working until edited.
+  const namedLegacy = lessonSets.find(
+    (s) => !s.jlpt_level && levelMentionedInName(s.name) === jlptLevel
+  );
+  if (namedLegacy) return namedLegacy;
+
+  // Before levels reset at N3, untagged sets followed the original global ranges.
+  const isHistoricRange =
+    (jlptLevel === "n5" && lessonNumber >= 1 && lessonNumber <= 25) ||
+    (jlptLevel === "n4" && lessonNumber >= 26 && lessonNumber <= 50);
+  if (!isHistoricRange) return null;
+
+  const exactNames = [lessonVocabularySetName(lessonNumber), lessonFolderName(lessonNumber)];
+  return (
+    lessonSets.find(
+      (s) => !s.jlpt_level && !levelMentionedInName(s.name) && exactNames.includes(s.name.trim())
+    ) ??
+    lessonSets.find((s) => !s.jlpt_level && !levelMentionedInName(s.name)) ??
+    null
+  );
 }
 
 function filterYoutubeVideos(videos: YoutubePlaylistVideo[], lessonNumber: number): YoutubePlaylistVideo[] {
@@ -161,7 +193,7 @@ export async function loadLessonDashboardData(
   if (lessonFolder) documentsTrail.push({ id: lessonFolder.id, name: lessonFolder.name });
 
   const documentFiles = lessonFolder ? await listWorkspaceFiles(lessonFolder.id) : [];
-  const flashcardSet = findFlashcardSet(sets, lessonNumber);
+  const flashcardSet = findFlashcardSet(sets, lessonNumber, jlptLevel);
   const flashcards = flashcardSet ? await listFlashcardsInSet(flashcardSet.id) : [];
   const flashcardNotes = toFlashcardNoteItems(flashcards);
   const youtubeVideos = filterYoutubeVideos(playlistVideos, lessonNumber);
@@ -188,7 +220,7 @@ export function suggestedLessonFolderName(lessonNumber: number): string {
 }
 
 export function suggestedFlashcardSetName(lessonNumber: number): string {
-  return lessonVocabularySetName(lessonNumber);
+  return lessonFolderName(lessonNumber);
 }
 
 export function jlptLevelLabel(key: JlptPlaylistKey): string {

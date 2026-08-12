@@ -31,6 +31,7 @@ import {
   usingLocalStorage,
 } from "@/lib/flashcards-repo";
 import type { CardSetRow, FlashcardRow } from "@/lib/types";
+import { flashcardSetLevelLabel } from "@/lib/flashcard-set-level";
 import { onWorkspaceNavigate, type WorkspaceNavigateDetail } from "@/lib/workspace-nav";
 
 function tileLabel(card: FlashcardRow): string {
@@ -304,7 +305,9 @@ export default function HomePage() {
     [activeSetId, cards, refresh]
   );
 
-  const activeSetName = sets.find((s) => s.id === activeSetId)?.name;
+  const activeSet = sets.find((s) => s.id === activeSetId);
+  const activeSetName = activeSet?.name;
+  const activeSetLevelLabel = flashcardSetLevelLabel(activeSet?.jlpt_level);
   const canReorderCards = Boolean(activeSetId && cards.length > 0 && !cardsLoading && loaded);
 
   return (
@@ -429,6 +432,11 @@ export default function HomePage() {
                 <span className="text-pink-200" aria-hidden>
                   /
                 </span>
+                {activeSetLevelLabel && (
+                  <span className="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-[0.68rem] font-bold tracking-wide text-violet-700 ring-1 ring-violet-200/80">
+                    {activeSetLevelLabel}
+                  </span>
+                )}
                 <span className="min-w-0 truncate px-2 font-semibold text-neutral-900">{activeSetName}</span>
                 <button
                   type="button"
@@ -437,8 +445,8 @@ export default function HomePage() {
                     if (row) setRenamingCollection(row);
                   }}
                   className="shrink-0 rounded-full p-1.5 text-pink-500 transition hover:bg-pink-50 hover:text-pink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-400"
-                  title="Rename collection"
-                  aria-label="Rename collection"
+                  title="Edit collection name and level"
+                  aria-label="Edit collection"
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
                     <path

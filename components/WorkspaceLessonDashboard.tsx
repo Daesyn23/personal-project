@@ -5,6 +5,13 @@ import { LessonNotesMarkdown } from "@/components/LessonNotesMarkdown";
 import { HeadingWithInfo } from "@/components/InfoTip";
 import { createWorkspaceFolder, listWorkspaceFolders } from "@/lib/documents-repo";
 import { createCardSet } from "@/lib/flashcards-repo";
+import { FLASHCARD_SET_LEVELS } from "@/lib/flashcard-set-level";
+import {
+  defaultLessonForLevel,
+  isLessonAvailableForLevel,
+  lessonRangeForLevel,
+} from "@/lib/jlpt-lesson-range";
+import type { FlashcardSetLevel } from "@/lib/types";
 import {
   compileFlashcardNotesMarkdown,
   jlptLevelLabel,
@@ -80,6 +87,7 @@ export function WorkspaceLessonDashboard({ onOpenFlashcardSet }: Props) {
   const [notesFullscreen, setNotesFullscreen] = useState(false);
   const [activeNotesTab, setActiveNotesTab] = useState<NotesTabId | null>(null);
   const [jumpValue, setJumpValue] = useState("");
+  const [levelPickerOpen, setLevelPickerOpen] = useState(false);
 
   const reload = useCallback(async (p: LessonProgress) => {
     setLoading(true);
@@ -164,12 +172,16 @@ export function WorkspaceLessonDashboard({ onOpenFlashcardSet }: Props) {
     }
   }, [data, progress, reload]);
 
-  const createFlashcardSet = useCallback(async () => {
+  const createFlashcardSet = useCallback(async (jlptLevel: FlashcardSetLevel) => {
     if (!progress) return;
     setBusy(true);
     setError(null);
     try {
-      const id = await createCardSet(suggestedFlashcardSetName(progress.lessonNumber));
+      const id = await createCardSet(
+        suggestedFlashcardSetName(progress.lessonNumber),
+        jlptLevel
+      );
+      setLevelPickerOpen(false);
       onOpenFlashcardSet(id);
       navigateWorkspaceDetail({ area: "flashcards", flashcardSetId: id });
       await reload(progress);
@@ -217,11 +229,37 @@ export function WorkspaceLessonDashboard({ onOpenFlashcardSet }: Props) {
   const applyJump = useCallback(() => {
     if (!progress) return;
     const n = parseInt(jumpValue.trim(), 10);
-    if (!Number.isFinite(n) || n < 1) return;
+    const range = lessonRangeForLevel(progress.jlptLevel);
+    if (!isLessonAvailableForLevel(progress.jlptLevel, n)) {
+      setError(
+        `${progress.jlptLevel.toUpperCase()} lessons are available from ${range.min} to ${range.max}.`
+      );
+      return;
+    }
+    setError(null);
     void updateProgress({ ...progress, lessonNumber: n });
   }, [jumpValue, progress, updateProgress]);
 
+  const changeJlptLevel = useCallback(
+    (jlptLevel: JlptPlaylistKey) => {
+      if (!progress) return;
+      setError(null);
+      void updateProgress({
+        ...progress,
+        jlptLevel,
+        lessonNumber: defaultLessonForLevel(jlptLevel),
+      });
+    },
+    [progress, updateProgress]
+  );
+
   const lessonNumber = progress?.lessonNumber ?? 1;
+  const lessonRange = lessonRangeForLevel(progress?.jlptLevel ?? "n4");
+  const jumpNumber = Number.parseInt(jumpValue, 10);
+  const canJump = progress
+    ? isLessonAvailableForLevel(progress.jlptLevel, jumpNumber)
+    : false;
+  const isLastLesson = lessonNumber >= lessonRange.max;
   const lessonLabel = `Lesson ${lessonNumber}`;
   const levelLabel = progress ? jlptLevelLabel(progress.jlptLevel) : "";
   const videoNotesCount = data?.lessonNotes.length ?? 0;
@@ -297,13 +335,13 @@ export function WorkspaceLessonDashboard({ onOpenFlashcardSet }: Props) {
             <p className="mt-2 text-sm text-neutral-600">{levelLabel} · Minna no Nihongo</p>
           </div>
 
-          <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-start gap-3">
             <label className="block">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">JLPT level</span>
               <select
                 value={progress.jlptLevel}
                 disabled={busy}
-                onChange={(e) => void updateProgress({ ...progress, jlptLevel: e.target.value as JlptPlaylistKey })}
+                onChange={(e) => changeJlptLevel(e.target.value as JlptPlaylistKey)}
                 className="mt-1 block h-10 min-w-[8rem] rounded-xl border border-pink-200 bg-white px-3 text-sm font-semibold text-neutral-900 shadow-sm outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-200/60"
               >
                 {JLPT_YOUTUBE_PLAYLISTS.map((p) => (
@@ -317,26 +355,36 @@ export function WorkspaceLessonDashboard({ onOpenFlashcardSet }: Props) {
               <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Jump to lesson</span>
               <div className="mt-1 flex gap-2">
                 <input
-                  type="text"
+                  type="number"
                   inputMode="numeric"
+                  min={lessonRange.min}
+                  max={lessonRange.max}
                   value={jumpValue}
-                  onChange={(e) => setJumpValue(e.target.value.replace(/\D/g, ""))}
+                  onChange={(e) => {
+                    setJumpValue(e.target.value);
+                    setError(null);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") applyJump();
                   }}
                   className="h-10 w-16 rounded-xl border border-pink-200 bg-white px-2 text-center text-sm font-semibold shadow-sm outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-200/60"
                 />
-                <button type="button" onClick={applyJump} disabled={busy} className={btnGhost}>
+                <button type="button" onClick={applyJump} disabled={busy || !canJump} className={btnGhost}>
                   Go
                 </button>
               </div>
+              <span className="mt-1 block text-[11px] text-neutral-500">
+                Available: {lessonRange.min}–{lessonRange.max}
+              </span>
             </label>
           </div>
         </div>
 
         <div className="mt-6 flex flex-wrap gap-3 border-t border-pink-100/80 pt-5">
-          <button type="button" disabled={busy} onClick={() => void completeLesson()} className={btnPrimary}>
-            Done — next lesson ({progress.lessonNumber + 1})
+          <button type="button" disabled={busy || isLastLesson} onClick={() => void completeLesson()} className={btnPrimary}>
+            {isLastLesson
+              ? `Last ${progress.jlptLevel.toUpperCase()} lesson reached`
+              : `Done — next lesson (${progress.lessonNumber + 1})`}
           </button>
         </div>
       </section>
@@ -409,7 +457,7 @@ export function WorkspaceLessonDashboard({ onOpenFlashcardSet }: Props) {
                     Open flashcards
                   </button>
                 ) : (
-                  <button type="button" disabled={busy} onClick={() => void createFlashcardSet()} className={btnPrimary}>
+                  <button type="button" disabled={busy} onClick={() => setLevelPickerOpen(true)} className={btnPrimary}>
                     Create flashcards
                   </button>
                 )
@@ -604,7 +652,7 @@ export function WorkspaceLessonDashboard({ onOpenFlashcardSet }: Props) {
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => void createFlashcardSet()}
+                    onClick={() => setLevelPickerOpen(true)}
                     className="font-semibold text-violet-800 underline decoration-violet-300 underline-offset-2 hover:text-violet-950 disabled:opacity-50"
                   >
                     Create flashcards
@@ -623,6 +671,45 @@ export function WorkspaceLessonDashboard({ onOpenFlashcardSet }: Props) {
             onClose={() => setNotesFullscreen(false)}
           />
         </>
+      ) : null}
+
+      {levelPickerOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dashboard-flashcard-level-title"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl ring-1 ring-pink-100 sm:p-6">
+            <h2 id="dashboard-flashcard-level-title" className="text-center text-lg font-semibold text-neutral-900">
+              Choose JLPT level
+            </h2>
+            <p className="mt-2 text-center text-sm text-neutral-600">
+              Which level is Lesson {progress.lessonNumber} for?
+            </p>
+            <div className="mt-5 grid grid-cols-3 gap-2">
+              {FLASHCARD_SET_LEVELS.map((level) => (
+                <button
+                  key={level.value}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void createFlashcardSet(level.value)}
+                  className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-3 text-sm font-bold text-violet-800 transition hover:bg-violet-100 disabled:opacity-50"
+                >
+                  {level.value.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setLevelPickerOpen(false)}
+              className="mt-4 w-full rounded-lg px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-100 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );

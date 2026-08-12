@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { HeadingWithInfo } from "@/components/InfoTip";
+import { FLASHCARD_SET_LEVELS } from "@/lib/flashcard-set-level";
 import { createCardSet } from "@/lib/flashcards-repo";
+import type { FlashcardSetLevel } from "@/lib/types";
 
 type Props = {
   onCreated: (setId: string) => void;
@@ -11,12 +13,14 @@ type Props = {
 export function NewCollectionButton({ onCreated }: Props) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [jlptLevel, setJlptLevel] = useState<FlashcardSetLevel | "">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const close = () => {
     setOpen(false);
     setName("");
+    setJlptLevel("");
     setError(null);
   };
 
@@ -26,10 +30,14 @@ export function NewCollectionButton({ onCreated }: Props) {
       setError("Enter a name for this collection.");
       return;
     }
+    if (!jlptLevel) {
+      setError("Select N5, N4, or N3 for this collection.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const id = await createCardSet(trimmed);
+      const id = await createCardSet(trimmed, jlptLevel);
       close();
       onCreated(id);
     } catch (e) {
@@ -86,6 +94,25 @@ export function NewCollectionButton({ onCreated }: Props) {
                 if (e.key === "Enter") void submit();
               }}
             />
+            <label className="mt-4 block text-sm font-medium text-neutral-700" htmlFor="new-collection-level">
+              JLPT level tag
+            </label>
+            <select
+              id="new-collection-level"
+              value={jlptLevel}
+              onChange={(e) => setJlptLevel(e.target.value as FlashcardSetLevel | "")}
+              className="mt-1 w-full rounded-lg border border-pink-200 bg-[#fffafc] px-3 py-2 text-sm outline-none ring-pink-300 focus:ring-2"
+            >
+              <option value="">Select a JLPT level</option>
+              {FLASHCARD_SET_LEVELS.map((level) => (
+                <option key={level.value} value={level.value}>
+                  {level.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">
+              This level is saved with the collection in the database.
+            </p>
             {error && (
               <p className="mt-2 text-sm text-red-600" role="alert">
                 {error}
@@ -101,7 +128,7 @@ export function NewCollectionButton({ onCreated }: Props) {
               </button>
               <button
                 type="button"
-                disabled={busy || !name.trim()}
+                disabled={busy || !name.trim() || !jlptLevel}
                 onClick={() => void submit()}
                 className="w-full rounded-lg bg-pink-500 px-4 py-2 text-sm font-medium text-white hover:bg-pink-600 disabled:opacity-50 sm:w-auto"
               >

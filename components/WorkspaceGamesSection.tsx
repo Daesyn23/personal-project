@@ -17,6 +17,7 @@ import {
   type GameId,
 } from "@/lib/games/types";
 import type { CardSetRow, FlashcardRow } from "@/lib/types";
+import { flashcardSetLevelLabel } from "@/lib/flashcard-set-level";
 
 type Props = {
   sets: CardSetRow[];
@@ -214,6 +215,7 @@ export function WorkspaceGamesSection({
               >
                 {sets.map((s) => (
                   <option key={s.id} value={s.id}>
+                    {flashcardSetLevelLabel(s.jlpt_level) ? `[${flashcardSetLevelLabel(s.jlpt_level)}] ` : ""}
                     {s.name}
                     {typeof s.card_count === "number" ? ` (${s.card_count})` : ""}
                   </option>
