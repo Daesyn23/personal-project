@@ -1,4 +1,5 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { compareFlashcardSets } from "@/lib/flashcard-set-level";
 import type { CardSetRow, FlashcardDraft, FlashcardRow, FlashcardSetLevel } from "@/lib/types";
 
 const LOCAL_KEY = "flashcard-presentation:v2";
@@ -54,9 +55,7 @@ function writeLocal(store: LocalStore) {
 }
 
 function sortCardSetsByName(sets: CardSetRow[]): CardSetRow[] {
-  return [...sets].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
-  );
+  return [...sets].sort(compareFlashcardSets);
 }
 
 function localCardSetsWithCounts(): CardSetRow[] {
