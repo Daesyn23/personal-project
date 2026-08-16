@@ -63,12 +63,23 @@ function runSpeakInUserGestureTurn(synth: SpeechSynthesis, epoch: number, fn: ()
   fn();
 }
 
-export function getBestJapaneseVoice(): SpeechSynthesisVoice | undefined {
-  if (typeof window === "undefined") return undefined;
+export function getJapaneseVoices(): SpeechSynthesisVoice[] {
+  if (typeof window === "undefined") return [];
   const list = window.speechSynthesis.getVoices();
+  return list.filter(
+    (v) =>
+      v.lang.replace("_", "-").toLowerCase().startsWith("ja") ||
+      /Japanese|日本語|Kyoto|Kyoko|Otoya|Hattori|Nanami|Haruka/i.test(v.name)
+  );
+}
+
+export function getBestJapaneseVoice(preferredVoiceURI?: string | null): SpeechSynthesisVoice | undefined {
+  if (typeof window === "undefined") return undefined;
+  const list = getJapaneseVoices();
   return (
-    list.find((v) => v.lang.replace("_", "-").toLowerCase().startsWith("ja")) ||
-    list.find((v) => /Japanese|日本語|Kyoto|Otoya|Hattori/i.test(v.name))
+    (preferredVoiceURI ? list.find((v) => v.voiceURI === preferredVoiceURI) : undefined) ||
+    list.find((v) => /Kyoko|Nanami|Haruka|Ayumi|Sayaka|female/i.test(v.name)) ||
+    list[0]
   );
 }
 
@@ -95,6 +106,8 @@ export type SpeakCallbacks = {
   onEnd?: () => void;
   /** Browser error code when available, e.g. "not-allowed", "synthesis-failed". */
   onError?: (code?: string) => void;
+  /** Browser voice chosen by the user. An unavailable voice falls back safely. */
+  voiceURI?: string | null;
 };
 
 const BENIGN_SYNTH_ERRORS = new Set(["canceled", "interrupted"]);
@@ -135,7 +148,13 @@ export function speakJapaneseLine(
 
     const speakOnce = (langOnly: boolean, shortJa: boolean) => {
       if (epoch !== utteranceEpoch) return;
-      const voice = langOnly || isChromiumChrome() ? undefined : getBestJapaneseVoice();
+      const preferredVoice = callbacks.voiceURI
+        ? getBestJapaneseVoice(callbacks.voiceURI)
+        : undefined;
+      const voice =
+        langOnly || (!preferredVoice && isChromiumChrome())
+          ? undefined
+          : preferredVoice ?? getBestJapaneseVoice();
       const u = new SpeechSynthesisUtterance(trimmed);
       u.volume = 1;
       if (voice && !langOnly) {

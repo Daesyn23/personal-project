@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cancelSpeechSynthesis } from "@/lib/japanese-tts";
+import { cancelSpeechSynthesis, getJapaneseVoices } from "@/lib/japanese-tts";
 import type { FlashcardRow } from "@/lib/types";
 import { publishPresentationMode } from "@/lib/workspace-floating-panels";
 import { FlashcardSlide, type FlashcardSlideHandle } from "@/components/FlashcardSlide";
@@ -21,6 +21,14 @@ type Props = {
   onIndexChange: (i: number) => void;
 };
 
+const FLASHCARD_JAPANESE_VOICE_KEY = "workspace-flashcard-japanese-voice-v1";
+
+type JapaneseVoiceOption = {
+  voiceURI: string;
+  name: string;
+  lang: string;
+};
+
 export function PresentFlashcards({
   cards,
   index,
@@ -31,6 +39,8 @@ export function PresentFlashcards({
   const card = cards[index];
   const slideRef = useRef<FlashcardSlideHandle>(null);
   const [phase, setPhase] = useState<PresentationPhase>("word");
+  const [japaneseVoices, setJapaneseVoices] = useState<JapaneseVoiceOption[]>([]);
+  const [japaneseVoiceURI, setJapaneseVoiceURI] = useState("");
   const { zoom, setCardZoom } = usePresentationCardZoom("workspace-flashcard-present-zoom-v1");
 
   useEffect(() => {
@@ -44,6 +54,38 @@ export function PresentFlashcards({
   useEffect(() => {
     if (!open) cancelSpeechSynthesis();
   }, [open]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+
+    const refresh = () => {
+      const stored = window.localStorage.getItem(FLASHCARD_JAPANESE_VOICE_KEY) ?? "";
+      const next = getJapaneseVoices().map((voice) => ({
+        voiceURI: voice.voiceURI,
+        name: voice.name,
+        lang: voice.lang,
+      }));
+      setJapaneseVoices(next);
+      setJapaneseVoiceURI((current) => {
+        const preferred = current || stored;
+        return preferred && next.some((voice) => voice.voiceURI === preferred)
+          ? preferred
+          : "";
+      });
+    };
+
+    refresh();
+    synth.addEventListener("voiceschanged", refresh);
+    return () => synth.removeEventListener("voiceschanged", refresh);
+  }, []);
+
+  const changeJapaneseVoice = useCallback((voiceURI: string) => {
+    cancelSpeechSynthesis();
+    setJapaneseVoiceURI(voiceURI);
+    if (voiceURI) window.localStorage.setItem(FLASHCARD_JAPANESE_VOICE_KEY, voiceURI);
+    else window.localStorage.removeItem(FLASHCARD_JAPANESE_VOICE_KEY);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -153,6 +195,25 @@ export function PresentFlashcards({
             Card {index + 1} / {cards.length}
           </span>
           <span className="mt-0.5 block text-xs text-pink-600">{phaseLabel}</span>
+          {japaneseVoices.length > 0 ? (
+            <label className="mx-auto mt-1.5 flex w-fit max-w-full items-center gap-1.5 text-xs text-neutral-500">
+              <span className="shrink-0">Voice</span>
+              <select
+                value={japaneseVoiceURI}
+                onChange={(e) => changeJapaneseVoice(e.target.value)}
+                className="min-w-0 max-w-[13rem] rounded-md border border-pink-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700 outline-none focus:border-pink-400 focus:ring-2 focus:ring-pink-200/60"
+                aria-label="Japanese pronunciation voice"
+                title="Choose the Japanese voice used for flashcards"
+              >
+                <option value="">Automatic</option>
+                {japaneseVoices.map((voice) => (
+                  <option key={voice.voiceURI} value={voice.voiceURI}>
+                    {voice.name} ({voice.lang})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </span>
       </header>
 
@@ -163,7 +224,12 @@ export function PresentFlashcards({
             style={{ zoom }}
           >
             <div key={card.id} className="flashcard-enter">
-              <FlashcardSlide ref={slideRef} card={card} phase={phase} />
+              <FlashcardSlide
+                ref={slideRef}
+                card={card}
+                phase={phase}
+                japaneseVoiceURI={japaneseVoiceURI || null}
+              />
             </div>
           </div>
         </div>

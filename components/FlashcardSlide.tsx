@@ -20,6 +20,8 @@ type Props = {
    */
   phase?: PresentationPhase;
   className?: string;
+  /** Selected browser Japanese voice for pronunciation playback. */
+  japaneseVoiceURI?: string | null;
 };
 
 /**
@@ -158,7 +160,7 @@ function IconStopSpeech({ className }: { className?: string }) {
 }
 
 export const FlashcardSlide = forwardRef<FlashcardSlideHandle, Props>(function FlashcardSlide(
-  { card, phase = "word", className = "" },
+  { card, phase = "word", className = "", japaneseVoiceURI = null },
   ref
 ) {
   const jpLine = japaneseLine(card);
@@ -192,14 +194,14 @@ export const FlashcardSlide = forwardRef<FlashcardSlideHandle, Props>(function F
   }, []);
 
   useEffect(() => {
-    const key = `${card.id}:${phase}`;
+    const key = `${card.id}:${phase}:${japaneseVoiceURI ?? "automatic"}`;
     if (lastSpeakKeyRef.current !== null && lastSpeakKeyRef.current !== key) {
       cancelSpeechSynthesis();
       setSpeaking(false);
       setTtsHint(null);
     }
     lastSpeakKeyRef.current = key;
-  }, [card.id, phase]);
+  }, [card.id, japaneseVoiceURI, phase]);
 
   const jpSpeak = jpLine ? textForFlashcardSpeech(jpLine) : "";
   const romajiSpeak = card.phonetic_reading ? textForFlashcardSpeech(card.phonetic_reading) : "";
@@ -227,6 +229,7 @@ export const FlashcardSlide = forwardRef<FlashcardSlideHandle, Props>(function F
       speakJapaneseLine(jp, "japanese", {
         onEnd: () => setSpeaking(false),
         onError: onErr,
+        voiceURI: japaneseVoiceURI,
       });
       setSpeaking(true);
     } else if (romaji) {
@@ -244,7 +247,7 @@ export const FlashcardSlide = forwardRef<FlashcardSlideHandle, Props>(function F
     } else {
       setSpeaking(false);
     }
-  }, [glossSpeak, jpSpeak, romajiSpeak]);
+  }, [glossSpeak, japaneseVoiceURI, jpSpeak, romajiSpeak]);
 
   const handleSpeakToggle = useCallback(() => {
     if (speaking) {
