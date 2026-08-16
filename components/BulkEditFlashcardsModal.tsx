@@ -14,6 +14,7 @@ import {
   convertJapaneseFieldsToHiragana,
   rowsNeedKanjiReadingForHiragana,
 } from "@/lib/flashcard-hiragana";
+import { romajiMatchesKana, validateGeneratedMinnaRomaji } from "@/lib/minna-romaji";
 import type { FlashcardDraft, FlashcardRow } from "@/lib/types";
 
 const DRAFT_PREFIX = "draft:";
@@ -140,6 +141,7 @@ function rowWantsEnrichment(row: RowDraft): boolean {
   if (!ka || !def) return false;
   return (
     !row.phonetic_reading.trim() ||
+    !romajiMatchesKana(ka, row.phonetic_reading) ||
     !row.category_label.trim() ||
     !row.example_sentence.trim() ||
     !row.example_translation.trim() ||
@@ -154,9 +156,14 @@ function pickFill(existing: string, incoming: string | null | undefined): string
 }
 
 function mergeEnrichment(row: RowDraft, ai: EnrichResultRow): RowDraft {
+  const existingRomajiIsValid = romajiMatchesKana(row.kana, row.phonetic_reading);
+  const correctedRomaji = validateGeneratedMinnaRomaji(row.kana, ai.phonetic_reading);
   return {
     ...row,
-    phonetic_reading: pickFill(row.phonetic_reading, ai.phonetic_reading),
+    phonetic_reading:
+      row.phonetic_reading.trim() && existingRomajiIsValid
+        ? row.phonetic_reading
+        : correctedRomaji ?? row.phonetic_reading,
     category_label: pickFill(row.category_label, ai.category_label),
     example_sentence: pickFill(row.example_sentence, ai.example_sentence),
     example_translation: pickFill(row.example_translation, ai.example_translation),
@@ -346,7 +353,7 @@ export function BulkEditFlashcardsModal({ setId, cards, onClose, onSaved, onCard
       return "Add GEMINI_API_KEY, GROQ_API_KEY, and/or OPENAI_API_KEY to .env.local, or use Try anyway.";
     if (geminiReady === null) return "Checking AI configuration…";
     if (!hasAutofillTargets) {
-      return "All target fields are already filled (romaji, group, example, translation, teacher research), or new rows need a saved card id for autofill.";
+      return "All target fields are filled and romaji matches kana, or new rows need a saved card id for autofill.";
     }
     return "";
   }, [hasAutofillTargets, geminiReady, autofillTryAnyway, autofillBusy]);

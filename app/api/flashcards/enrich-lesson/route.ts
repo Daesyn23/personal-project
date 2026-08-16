@@ -7,6 +7,7 @@ import {
   withGemini429QuotaRetry,
 } from "@/lib/gemini-model";
 import { generateTextGeminiThenGroq, isAnyTextLlmConfigured } from "@/lib/gemini-with-groq-fallback";
+import { validateGeneratedMinnaRomaji } from "@/lib/minna-romaji";
 
 export const runtime = "nodejs";
 /** Allows one RetryInfo backoff on 429; needs a host with a long enough route timeout (e.g. local dev). */
@@ -88,6 +89,8 @@ Schema:
 
 Rules for EACH input item (matched by "id"):
 - "phonetic_reading": **Minna-style spaced romaji** for the headword (Modified Hepburn, **lowercase ASCII only** — no macrons; write **ou** for long **o**, **ee** for long **e**, etc.).
+  - Derive it character-by-character from the supplied **kana**, never from the English definition or from memory. Before returning, remove the spaces mentally and verify every letter against the kana.
+  - Be especially careful with し=shi, ち=chi, つ=tsu, ふ=fu, じ=ji, small ゃゅょ combinations, small っ consonant doubling, and long vowels. Never confuse Japanese **r** with English **l**.
   - **Never** output one glued token like "wasuremasu" or "nakushimasu".
   - **Insert ASCII spaces** between short romaji chunks so it matches *Minna no Nihongo* vocabulary columns: romanize **each hiragana mora** (or **ゃゅょ** with the previous character) as its own piece, **except** write the polite ending as **masu**, **mashita**, **masen**, **nai** as **single** trailing pieces (still preceded by a space from the stem).
   - Concrete targets: くれます → "ku re masu". なおします → "na o shi masu". わすれます → "wa su re masu". つれていきます → "tsu re te i ki masu". つれてきます → "tsu re te ki masu". おくります → "o ku ri masu". しょうかいします → "shou kai shi masu". なくします → "na ku shi masu". はらいます → "ha ra i masu".
@@ -438,7 +441,17 @@ export async function POST(req: Request) {
         );
       }
 
-      const ordered = orderEnrichmentForChunk(chunk, resultsRaw);
+      const ordered = orderEnrichmentForChunk(chunk, resultsRaw).map((row, index) =>
+        enrichMode === "fill"
+          ? {
+              ...row,
+              phonetic_reading: validateGeneratedMinnaRomaji(
+                chunk[index]!.kana,
+                row.phonetic_reading
+              ),
+            }
+          : row
+      );
       allResults.push(...ordered);
     } catch (e) {
       let msg = e instanceof Error ? e.message : "Enrichment failed.";
