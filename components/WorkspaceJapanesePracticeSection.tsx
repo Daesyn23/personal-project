@@ -1465,7 +1465,7 @@ export function WorkspaceJapanesePracticeSection() {
               ? micMuted
                 ? "Mic is off — what you already said still goes to Berry. Unmute to talk again."
                 : `Hands-free — pause briefly when you finish. ${TUTOR_NAME} replies as soon as she can.`
-              : "Japanese, English, or Tagalog. Berry checks grammar and pronunciation while you talk."}
+              : "Speak Japanese—or use English or Tagalog when you get stuck. Berry answers in simple Japanese and checks your pronunciation."}
           </p>
         </div>
 
