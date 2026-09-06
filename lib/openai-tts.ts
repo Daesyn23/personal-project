@@ -5,8 +5,8 @@
 
 const OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech";
 
-/** Warm, expressive default for Berry (override with OPENAI_TTS_VOICE). */
-export const DEFAULT_OPENAI_TTS_VOICE = "coral";
+/** Grounded, mature default for Berry (override with OPENAI_TTS_VOICE). */
+export const DEFAULT_OPENAI_TTS_VOICE = "cedar";
 /** gpt-4o-mini-tts supports naturalness via `instructions`; tts-1 is faster but flatter. */
 export const DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
 
@@ -22,7 +22,8 @@ export function buildPracticeTtsInstructions(register: PracticeTtsRegister = "po
       ? "Japanese lines use warm polite です／ます — friendly, not stiff broadcast Japanese."
       : "Japanese lines use casual plain speech — relaxed friend tone, not slangy host.";
   return [
-    "You are Berry（ベリー）, a warm woman with a slightly deeper relaxed alto voice — friendly and natural, never squeaky, breathy-high, or childlike.",
+    "You are Berry（ベリー）, a calm mature adult in your late 30s or 40s with a grounded lower register and steady relaxed delivery.",
+    "Never sound childlike, cute, squeaky, bubbly, breathy-high, or overly excited. Avoid exaggerated upward inflection and giggling.",
     "Sound fully human and alive — NEVER flat, monotone, or text-to-speech robotic.",
     "The entire input is ONE continuous utterance — read it straight through like natural speech, not separate clips or a list.",
     "Do NOT pause at periods, 。, !, or ? — glide through them. Only a barely perceptible micro-pause at commas or 、.",
