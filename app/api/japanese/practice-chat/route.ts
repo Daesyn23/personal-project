@@ -106,7 +106,7 @@ export async function POST(req: Request) {
   const replyMode = lastUser
     ? resolvePracticeReplyLanguage(lastUser.content, priorUserTexts)
     : "taglish";
-  const langHint = buildPracticeTurnLanguageHint(replyMode, speechRegister);
+  const langHint = buildPracticeTurnLanguageHint(replyMode, speechRegister, jlptLevel);
   const mergedSystem = [systemInstruction, langHint, ...clientSystem].filter(Boolean).join("\n\n");
 
   const openAiMessages: OpenAiChatMessage[] = [
@@ -133,7 +133,7 @@ export async function POST(req: Request) {
           let full = "";
           const gen = openaiChatCompletionStream({
             messages: openAiMessages,
-            temperature: 0.82,
+            temperature: 0.6,
             maxTokens: 160,
           });
           let model = resolveOpenAiChatModelId();
@@ -172,7 +172,7 @@ export async function POST(req: Request) {
   try {
     const { text, model } = await openaiChatCompletionText({
       messages: openAiMessages,
-      temperature: 0.82,
+      temperature: 0.6,
       maxTokens: 160,
     });
     return NextResponse.json({

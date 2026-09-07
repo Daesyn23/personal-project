@@ -201,12 +201,12 @@ function SpeechFeedbackCard({ feedback }: { feedback: JapaneseSpeechFeedback }) 
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${badge}`}>
           {correct ? "✓" : "↗"} {label}
         </span>
-        {feedback.heard && (
-          <span className={`min-w-0 truncate text-xs text-stone-600 ${jpFontClass}`}>
-            Heard: {feedback.heard}
-          </span>
-        )}
       </div>
+      {feedback.heard && (
+        <p className={`mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed text-stone-600 ${jpFontClass}`}>
+          Heard: {feedback.heard}
+        </p>
+      )}
       {feedback.naturalJapanese && (
         <p className={`mt-3 text-lg font-semibold text-stone-900 ${jpFontClass}`}>
           {feedback.naturalJapanese}
@@ -280,6 +280,7 @@ export function WorkspaceJapanesePracticeSection() {
   const listenRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interimFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interimTextRef = useRef("");
+  const latestUserTranscriptRef = useRef("");
   const voiceSessionRef = useRef(voiceSession);
   const loadingRef = useRef(loading);
   const messagesRef = useRef(messages);
@@ -1009,6 +1010,7 @@ export function WorkspaceJapanesePracticeSection() {
             },
             onSpeechStarted: () => {
               if (!voiceSessionRef.current || micMutedRef.current) return;
+              latestUserTranscriptRef.current = "";
               setLatestFeedback(null);
               setError(null);
               setSpeechDetected(true);
@@ -1023,6 +1025,7 @@ export function WorkspaceJapanesePracticeSection() {
             },
             onUserTranscript: (itemId, text) => {
               if (!voiceSessionRef.current) return;
+              latestUserTranscriptRef.current = text;
               const detected = detectUtteranceLanguage(text);
               setDetectedLang(detected);
               setInterim("");
@@ -1038,6 +1041,9 @@ export function WorkspaceJapanesePracticeSection() {
                 messagesRef.current = next;
                 return next;
               });
+              setLatestFeedback((current) =>
+                current ? { ...current, heard: text } : current
+              );
             },
             onAssistantTranscript: (itemId, text) => {
               if (!voiceSessionRef.current || !text) return;
@@ -1056,7 +1062,11 @@ export function WorkspaceJapanesePracticeSection() {
             },
             onFeedback: (feedback) => {
               if (!voiceSessionRef.current) return;
-              setLatestFeedback(feedback);
+              setLatestFeedback({
+                ...feedback,
+                // Keep the primary transcript instead of a second model's shorter assessment.
+                heard: latestUserTranscriptRef.current || feedback.heard,
+              });
             },
             onError: (message) => {
               if (!voiceSessionRef.current) return;

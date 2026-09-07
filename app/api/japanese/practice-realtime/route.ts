@@ -33,50 +33,56 @@ function eagerness(raw: string | null): "low" | "medium" | "high" {
   return "high";
 }
 
-const FEEDBACK_TOOL = {
-  type: "function",
-  name: "report_japanese_feedback",
-  description:
-    "Report a private, concise assessment of the learner's latest spoken turn. Judge the audio itself, including intelligibility and pronunciation, not only a transcript.",
-  parameters: {
-    type: "object",
-    properties: {
-      status: {
-        type: "string",
-        enum: ["correct", "almost", "needs_practice", "not_japanese"],
-        description:
-          "correct if the Japanese is natural and clearly pronounced; almost for one small issue; needs_practice only for a meaningful issue; not_japanese if the turn was not mainly Japanese.",
+function feedbackTool(jlptLevel: JlptPracticeLevel) {
+  const correctionLimit =
+    jlptLevel === "N5" ? "JLPT N5 words and grammar only" : "JLPT N5/N4 words and grammar only";
+
+  return {
+    type: "function",
+    name: "report_japanese_feedback",
+    description:
+      "Report a private assessment of the learner's latest complete spoken turn. Judge the original audio itself, including every clause, intelligibility, and pronunciation—not only the main point or an inferred summary.",
+    parameters: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["correct", "almost", "needs_practice", "not_japanese"],
+          description:
+            "correct if the Japanese is natural and clearly pronounced; almost for one small issue; needs_practice only for a meaningful issue; not_japanese if the turn was not mainly Japanese.",
+        },
+        heard: {
+          type: "string",
+          description:
+            "A complete verbatim Japanese transcript of the learner's entire turn. Preserve every word, particle, ending, repetition, negation, number, and self-correction in order. Never summarize or paraphrase. Use an empty string only for non-Japanese.",
+        },
+        natural_japanese: {
+          type: "string",
+          description:
+            `The minimally corrected natural Japanese, but only when status is almost or needs_practice. Keep the learner's meaning and details unchanged, and use ${correctionLimit}. Otherwise an empty string.`,
+        },
+        feedback: {
+          type: "string",
+          description:
+            "One short, friendly English tip. Mention the single most useful grammar or pronunciation point. Empty for not_japanese.",
+        },
+        pronunciation_focus: {
+          type: "string",
+          description:
+            "At most one short pronunciation target such as a long vowel, doubled consonant, mora timing, or pitch movement. Empty when no clear audio issue is present.",
+        },
       },
-      heard: {
-        type: "string",
-        description: "A short Japanese transcript of what was heard, or an empty string for non-Japanese.",
-      },
-      natural_japanese: {
-        type: "string",
-        description:
-          "The most natural corrected Japanese, but only when status is almost or needs_practice. Otherwise an empty string.",
-      },
-      feedback: {
-        type: "string",
-        description:
-          "One short, friendly English tip. Mention the single most useful grammar or pronunciation point. Empty for not_japanese.",
-      },
-      pronunciation_focus: {
-        type: "string",
-        description:
-          "At most one short pronunciation target such as a long vowel, doubled consonant, mora timing, or pitch movement. Empty when no clear audio issue is present.",
-      },
+      required: [
+        "status",
+        "heard",
+        "natural_japanese",
+        "feedback",
+        "pronunciation_focus",
+      ],
+      additionalProperties: false,
     },
-    required: [
-      "status",
-      "heard",
-      "natural_japanese",
-      "feedback",
-      "pronunciation_focus",
-    ],
-    additionalProperties: false,
-  },
-} as const;
+  } as const;
+}
 
 export async function GET() {
   return NextResponse.json({
@@ -120,8 +126,8 @@ export async function POST(req: Request) {
         transcription: {
           model: process.env.OPENAI_REALTIME_TRANSCRIPTION_MODEL?.trim() || DEFAULT_TRANSCRIPTION_MODEL,
           prompt:
-            "A friendly Japanese practice conversation. Expect JLPT N5/N4 Japanese, English, and occasional Filipino or Tagalog. Preserve Japanese particles, verb endings, long vowels, and small っ accurately.",
-          languages: ["ja", "en"],
+            "Transcribe the learner's entire utterance verbatim. Never summarize, paraphrase, translate, shorten, correct, or replace words with a more likely meaning. Preserve every clause in order, including particles, verb endings, negation, numbers, names, repetitions, fillers, false starts, long vowels, and small っ. Expect JLPT N5/N4 Japanese mixed with English and occasional Filipino or Tagalog; keep each language exactly as spoken and preserve code-switching.",
+          languages: ["ja", "en", "tl"],
           delay: "low",
         },
         turn_detection: {
@@ -135,7 +141,7 @@ export async function POST(req: Request) {
         voice: voice(),
       },
     },
-    tools: [FEEDBACK_TOOL],
+    tools: [feedbackTool(jlptLevel)],
     // Speak on the automatic VAD response immediately. The browser requests the
     // private feedback tool in a separate, non-audio response after speech is generated.
     tool_choice: "none",

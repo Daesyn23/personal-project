@@ -61,10 +61,10 @@ export function isPracticeRealtimeSupported(): boolean {
 }
 
 export function practiceVadEagerness(silenceMsIncomplete: number): "low" | "medium" | "high" {
-  // Existing balanced settings should feel conversational in Realtime. Semantic
-  // VAD high ends a confident utterance quickly while still understanding pauses.
-  if (silenceMsIncomplete >= 3600) return "low";
-  if (silenceMsIncomplete >= 2800) return "medium";
+  // Favor complete learner turns over the fastest possible response. Patient uses
+  // low eagerness, balanced uses medium, and only the quick preset uses high.
+  if (silenceMsIncomplete >= 3000) return "low";
+  if (silenceMsIncomplete >= 2000) return "medium";
   return "high";
 }
 
@@ -188,7 +188,7 @@ export async function connectPracticeRealtime(options: {
         max_output_tokens: 140,
         reasoning: { effort: "low" },
         instructions:
-          "Silently assess the learner's most recent spoken turn by calling report_japanese_feedback exactly once. Judge their original audio, including pronunciation. Do not produce a message or another spoken reply.",
+          "Silently assess the learner's most recent complete spoken turn by calling report_japanese_feedback exactly once. Judge their original audio, including pronunciation and every clause. The heard field must be a complete verbatim transcript, never a summary or only the main point. Do not produce a message or another spoken reply.",
       },
     });
   };
