@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { AddCardForm } from "@/components/AddCardForm";
 import { BulkEditFlashcardsModal } from "@/components/BulkEditFlashcardsModal";
 import { CollectionSetCard } from "@/components/CollectionSetCard";
@@ -34,6 +35,11 @@ import type { CardSetRow, FlashcardRow } from "@/lib/types";
 import { flashcardSetLevelLabel } from "@/lib/flashcard-set-level";
 import { onWorkspaceNavigate, type WorkspaceNavigateDetail } from "@/lib/workspace-nav";
 
+const WorkspaceLearningHub = dynamic(
+  () => import("@/components/WorkspaceLearningHub").then(module => module.WorkspaceLearningHub),
+  { loading: () => <p className="py-12 text-center text-sm text-pink-600" role="status">Opening your learning hub…</p> }
+);
+
 function tileLabel(card: FlashcardRow): string {
   return (
     card.kana?.trim() ||
@@ -47,6 +53,7 @@ function tileLabel(card: FlashcardRow): string {
 
 type WorkspaceArea =
   | "dashboard"
+  | "learningHub"
   | "documents"
   | "flashcards"
   | "review"
@@ -62,6 +69,7 @@ type WorkspaceArea =
 
 const WORKSPACE_TABS: { id: WorkspaceArea; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
+  { id: "learningHub", label: "Learning Hub" },
   { id: "documents", label: "Documents" },
   { id: "flashcards", label: "Flashcards" },
   { id: "review", label: "Review" },
@@ -135,6 +143,7 @@ export default function HomePage() {
   useEffect(() => {
     if (
       workspaceArea === "dashboard" ||
+      workspaceArea === "learningHub" ||
       workspaceArea === "documents" ||
       workspaceArea === "googleSheet" ||
       workspaceArea === "timer" ||
@@ -312,13 +321,13 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen min-w-0 bg-transparent">
-      <main className="mx-auto w-full min-w-0 max-w-6xl px-3 py-6 pb-14 sm:px-6 sm:py-12 sm:pb-20">
+      <main className={`mx-auto w-full min-w-0 ${workspaceArea === "learningHub" ? "max-w-[1600px]" : "max-w-6xl"} px-3 py-6 pb-14 sm:px-6 sm:py-12 sm:pb-20`}>
         <header className="mb-6 min-w-0 space-y-4 sm:mb-10 sm:space-y-5">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
             <div className="min-w-0">
               <p className="text-xs font-medium uppercase tracking-wider text-pink-500/90">Study</p>
               <h1 className="mt-1 bg-gradient-to-r from-pink-600 to-rose-500 bg-clip-text text-3xl font-bold tracking-tight text-transparent sm:text-4xl">
-                My Workspace
+                {workspaceArea === "learningHub" ? "My Learning Hub" : "My Workspace"}
               </h1>
               {usingLocalStorage() && loaded && (
                 <p className="mt-3 text-xs text-amber-700">
@@ -356,6 +365,7 @@ export default function HomePage() {
                   key={tab.id}
                   type="button"
                   onClick={() => setWorkspaceArea(tab.id)}
+                  aria-current={workspaceArea === tab.id ? "page" : undefined}
                   className={`relative -mb-px shrink-0 snap-start border-b-2 px-3 py-2 text-xs font-semibold whitespace-nowrap transition sm:px-4 sm:py-2.5 sm:text-sm ${
                     workspaceArea === tab.id
                       ? "border-pink-600 text-pink-700"
@@ -375,6 +385,8 @@ export default function HomePage() {
               setActiveSetId(setId);
             }}
           />
+        ) : workspaceArea === "learningHub" ? (
+          <WorkspaceLearningHub />
         ) : workspaceArea === "documents" ? (
           <WorkspaceDocumentsSection
             pendingNav={pendingNav}

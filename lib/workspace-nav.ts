@@ -4,6 +4,7 @@ import type { JlptPlaylistKey } from "@/lib/youtube-jlpt-playlists";
 
 export type WorkspaceNavigateArea =
   | "dashboard"
+  | "learningHub"
   | "documents"
   | "flashcards"
   | "review"
