@@ -10,11 +10,11 @@ const stories = {};
 for (const [index, raw] of readFileSync(input, "utf8").split(/\r?\n/).entries()) {
   if (!raw.trim() || raw.startsWith("#")) continue;
   const fields = raw.split("|").map(field => field.trim());
-  if (fields.length !== 4 || fields.some(field => !field)) throw new Error(`Invalid mnemonic on line ${index + 1}`);
-  const [character, pictures, scene, story] = fields;
+  if (fields.length !== 3 || fields.some(field => !field)) throw new Error(`Invalid mnemonic on line ${index + 1}`);
+  const [character, scene, story] = fields;
   if (!expected.has(character)) throw new Error(`Unexpected kanji: ${character}`);
   if (stories[character]) throw new Error(`Duplicate mnemonic: ${character}`);
-  stories[character] = { cues: pictures.split(/\s+/), scene, story };
+  stories[character] = { scene, story };
 }
 const missing = [...expected].filter(character => !stories[character]);
 if (missing.length) throw new Error(`Missing mnemonics: ${missing.join(" ")}`);

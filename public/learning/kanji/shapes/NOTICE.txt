@@ -1,0 +1,10 @@
+Kanji stroke drawings and component groupings derived from KanjiVG.
+Copyright (C) Ulrich Apel and KanjiVG contributors.
+Source: https://kanjivg.tagaini.net/
+Revision: https://github.com/KanjiVG/kanjivg/tree/422b5538595676da918c288a4230cb5e22a1ee7e
+License: Creative Commons Attribution-ShareAlike 3.0 Unported
+https://creativecommons.org/licenses/by-sa/3.0/
+Changes: extracted ordered stroke paths and top-level visual groups into JSON;
+rejoined interrupted groups; added interactive highlighting in the viewer.
+These derived drawings are distributed under the same CC BY-SA 3.0 license.
+The original mnemonic stories are separate from this drawing dataset.

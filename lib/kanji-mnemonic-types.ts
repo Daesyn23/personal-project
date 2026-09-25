@@ -1,6 +1,5 @@
 export type KanjiMnemonic = {
-  /** Simple picture cues illustrate the imagined scene, not historical glyph origins. */
-  cues: string[];
+  /** Original imagined scene; stroke geometry is loaded separately from KanjiVG. */
   scene: string;
   story: string;
 };
