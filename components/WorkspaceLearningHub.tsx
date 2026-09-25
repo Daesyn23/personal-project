@@ -3,9 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import material from "@/data/kanji-lessons.json";
+import mnemonicData from "@/data/kanji-mnemonics.json";
+import { KanjiMnemonicCard } from "@/components/KanjiMnemonicCard";
+import type { KanjiMnemonic } from "@/lib/kanji-mnemonic-types";
 import { matchesKanji, type KanjiEntry, type KanjiLesson, type KanjiLibrary } from "@/lib/kanji-learning";
 
 const library: KanjiLibrary = material;
+const mnemonics: Record<string, KanjiMnemonic> = mnemonicData;
 const ranges = [
   { label: "All lessons", start: 0, end: 40 },
   { label: "0–10", start: 0, end: 10 },
@@ -31,7 +35,7 @@ export function WorkspaceLearningHub() {
   const clearFilters = () => { setQuery(""); setRange(0); setLessonNumber("all"); };
 
   return (
-    <section aria-labelledby="learning-hub-title" className="learning-hub space-y-6">
+    <section aria-labelledby="learning-hub-title" className="learning-hub space-y-6 pb-24 sm:pb-0">
       <div className="relative overflow-hidden rounded-3xl border border-pink-100 bg-white/90 px-6 py-7 shadow-sm sm:px-9 sm:py-9">
         <div aria-hidden="true" lang="ja" className="pointer-events-none absolute -right-2 -top-9 select-none text-[200px] leading-none text-pink-50 sm:right-10">学</div>
         <div className="relative flex flex-wrap items-end justify-between gap-6">
@@ -158,6 +162,7 @@ function KanjiDetail({ lesson, entry, index, onClose, onStep, onSelect }: {
               </div>
             </div>
           </div>
+          <KanjiMnemonicCard key={entry.id} character={entry.character} mnemonic={mnemonics[entry.character]} />
           <section aria-labelledby="stroke-heading">
             <h3 id="stroke-heading" className="mb-3 text-sm font-semibold">Stroke order <span className="font-normal text-neutral-400">· from your lesson</span></h3>
             <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white"><Image unoptimized src={entry.strokeImage} alt={`Stroke order sequence for ${entry.character}, from Lesson ${lesson.number}`} width={1600} height={100} className="h-auto w-full min-w-[650px]" /></div>
