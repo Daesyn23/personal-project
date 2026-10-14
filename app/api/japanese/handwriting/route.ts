@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 import { resolveGeminiModelId } from "@/lib/gemini-model";
 import { openaiChatCompletionMultimodal } from "@/lib/openai-chat";
-import { HANDWRITING_SYSTEM, handwritingPng, recognizeHandwriting } from "@/lib/handwriting-recognition";
+import { HANDWRITING_SYSTEM, handwritingFailure, handwritingPng, recognizeHandwriting } from "@/lib/handwriting-recognition";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -40,9 +40,11 @@ export async function POST(request: Request) {
 
   const providers: (() => Promise<string>)[] = [];
   if (openaiKey) providers.push(async () => {
+    const model = process.env.OPENAI_HANDWRITING_MODEL?.trim() || "gpt-5.4";
+    const reasoning = /^gpt-[5-9](?:[.-]|$)/.test(model);
     const response = await openaiChatCompletionMultimodal({
-      model: process.env.OPENAI_VISION_MODEL?.trim() || "gpt-4o-mini",
-      jsonMode: true, temperature: 0, maxTokens: 256,
+      model, reasoningEffort: reasoning ? "low" : undefined,
+      jsonMode: true, temperature: 0, maxTokens: reasoning ? 1024 : 256,
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(22_000)]),
       messages: [
         { role: "system", content: HANDWRITING_SYSTEM },
@@ -68,7 +70,7 @@ export async function POST(request: Request) {
     const reading = await recognizeHandwriting(providers);
     if (!reading) return reply({ error: "I couldn’t read that clearly. Try larger hiragana with a little space between each character. Your score hasn’t changed." }, 422);
     return reply({ reading });
-  } catch {
-    return reply({ error: "Handwriting recognition is unavailable right now. Try again or switch to Type. Your score hasn’t changed." }, 503);
+  } catch (error) {
+    return reply({ error: handwritingFailure(error) }, 503);
   }
 }

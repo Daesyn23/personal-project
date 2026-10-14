@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { handwritingInkBounds } from "@/lib/handwriting-ink";
 
 type Point = { x: number; y: number };
 export type HandwritingDrawing = { strokes: Point[][]; rows: number };
@@ -62,13 +63,17 @@ export function HiraganaHandwritingPad({ drawing, onChange, busy, onDone }: {
   function submit() {
     if (!canvas.current || busy || writing || !drawing.strokes.length) return;
     // Export ink on white only. The CSS guides, kanji prompt and answers are never sent.
+    const bounds = handwritingInkBounds(drawing.strokes, WIDTH, drawing.rows * ROW);
+    if (!bounds) return;
     const image = document.createElement("canvas");
-    image.width = WIDTH; image.height = drawing.rows * ROW;
+    image.width = bounds.width; image.height = bounds.height;
     const ctx = image.getContext("2d");
     if (!ctx) return;
     ctx.fillStyle = "white";
     ctx.fillRect(0, 0, image.width, image.height);
-    ctx.drawImage(canvas.current, 0, 0);
+    // Paint the committed strokes directly, so export never depends on a pending canvas redraw.
+    ctx.translate(-bounds.x, -bounds.y);
+    for (const stroke of drawing.strokes) paintStroke(ctx, stroke);
     onDone(image.toDataURL("image/png"));
   }
 

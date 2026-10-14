@@ -170,6 +170,17 @@ export type OpenAiMultimodalMessage = {
   content: string | OpenAiMultimodalContentPart[];
 };
 
+export class OpenAiApiError extends Error {
+  status: number;
+  code: string | undefined;
+  constructor(status: number, code: string | undefined, message: string) {
+    super(message);
+    this.name = "OpenAiApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 /**
  * Chat with images (vision). Uses the same API key as text chat; prefer a vision-capable model
  * (default `gpt-4o-mini` via OPENAI_CHAT_MODEL).
@@ -181,6 +192,7 @@ export async function openaiChatCompletionMultimodal(options: {
   maxTokens?: number;
   jsonMode?: boolean;
   signal?: AbortSignal;
+  reasoningEffort?: "none" | "low" | "medium" | "high";
 }): Promise<{ text: string; model: string }> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
@@ -192,9 +204,14 @@ export async function openaiChatCompletionMultimodal(options: {
   const body: Record<string, unknown> = {
     model,
     messages: options.messages,
-    temperature: options.temperature ?? 0.2,
-    max_tokens: options.maxTokens ?? 4096,
   };
+  if (options.reasoningEffort !== undefined) {
+    body.reasoning_effort = options.reasoningEffort;
+    body.max_completion_tokens = options.maxTokens ?? 4096;
+  } else {
+    body.temperature = options.temperature ?? 0.2;
+    body.max_tokens = options.maxTokens ?? 4096;
+  }
   if (options.jsonMode) body.response_format = { type: "json_object" };
 
   const res = await fetch(OPENAI_CHAT_URL, {
@@ -220,7 +237,8 @@ export async function openaiChatCompletionMultimodal(options: {
       typeof data === "object" && data !== null && "error" in data
         ? String((data as { error?: { message?: string } }).error?.message ?? raw.slice(0, 400))
         : raw.slice(0, 400);
-    throw new Error(`OpenAI Chat error (${res.status}): ${errMsg}`);
+    const code = (data as { error?: { code?: unknown } } | null)?.error?.code;
+    throw new OpenAiApiError(res.status, typeof code === "string" ? code : undefined, `OpenAI Chat error (${res.status}): ${errMsg}`);
   }
 
   const text = (data as { choices?: { message?: { content?: string | null } }[] })?.choices?.[0]?.message
