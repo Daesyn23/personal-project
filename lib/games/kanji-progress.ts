@@ -1,8 +1,10 @@
+import type { PracticeObservation } from "./kanji-mastery";
 import type { QuestAnswer, QuestMode } from "./kanji-quest";
 
 export type LessonProgress = { answered: number; correct: number; xp: number; rounds: number; kanjiIds: string[] };
 export type KanjiProgress = {
   version: 1;
+  practice?: PracticeObservation[];
   lessons: Record<string, LessonProgress>;
   days: Record<string, number>;
   bestStreak: number;
@@ -46,6 +48,7 @@ export function recordRound(progress: KanjiProgress, round: PracticeRound, now =
   const day = studyDate(now);
   return {
     version: 1,
+    practice: [...(progress.practice ?? []), ...(round.mode === "kanji" ? round.answers.map(answer => ({ id: answer.card.id, correct: answer.correct, hinted: answer.hinted, at: now.toISOString() })) : [])],
     lessons: { ...progress.lessons, [round.lesson]: {
       answered: previous.answered + round.answers.length, correct: previous.correct + correct,
       xp: previous.xp + xp, rounds: previous.rounds + 1,
@@ -74,6 +77,7 @@ export function combineProgressEvents(events: ProgressEvent[]): KanjiProgress {
     .sort((a, b) => a.playedAt.localeCompare(b.playedAt) || a.id.localeCompare(b.id));
   const rounds = new Set<string>();
   for (const { progress } of unique) {
+    if (progress.practice?.length) result.practice = [...(result.practice ?? []), ...progress.practice];
     for (const [number, lesson] of Object.entries(progress.lessons)) {
       const previous = result.lessons[number] ?? { answered: 0, correct: 0, xp: 0, rounds: 0, kanjiIds: [] };
       result.lessons[number] = {
@@ -108,6 +112,9 @@ export function parseProgress(raw: string | null): KanjiProgress {
         || new Set(stats.kanjiIds).size !== stats.kanjiIds.length) return emptyProgress();
     }
     if (!Object.entries(value.days).every(([day, answers]) => /^\d{4}-\d{2}-\d{2}$/.test(day) && count(answers))) return emptyProgress();
+    if (value.practice !== undefined && (!Array.isArray(value.practice) || !value.practice.every(item => object(item)
+      && typeof item.id === "string" && item.id.length <= 200 && typeof item.correct === "boolean" && typeof item.hinted === "boolean"
+      && typeof item.at === "string" && Number.isFinite(Date.parse(item.at))))) return emptyProgress();
     return value as KanjiProgress;
   } catch { return emptyProgress(); }
 }

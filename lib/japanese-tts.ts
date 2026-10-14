@@ -103,6 +103,7 @@ export function chromeLikelyMissingJapaneseVoice(): boolean {
 }
 
 export type SpeakCallbacks = {
+  rate?: number;
   onEnd?: () => void;
   /** Browser error code when available, e.g. "not-allowed", "synthesis-failed". */
   onError?: (code?: string) => void;
@@ -164,7 +165,7 @@ export function speakJapaneseLine(
       } else {
         u.lang = shortJa ? "ja" : "ja-JP";
       }
-      u.rate = Math.min(1.15, kind === "reading" ? 0.88 : kind === "practice" ? 1.04 : 0.9);
+      u.rate = Math.max(0.5, Math.min(1.15, callbacks.rate ?? (kind === "reading" ? 0.88 : kind === "practice" ? 1.04 : 0.9)));
       u.pitch = kind === "practice" ? 0.93 : 1;
       u.onend = () => callbacks.onEnd?.();
       u.onerror = (ev) => {

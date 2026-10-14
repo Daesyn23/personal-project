@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { progressTotals, studyDate, studyStreak } from "@/lib/games/kanji-progress";
 import { progressSyncMessage, syncKanjiProgress } from "@/lib/games/kanji-progress-store";
+import { KanjiMasteryPanel } from "./KanjiMasteryPanel";
 import { useKanjiProgress } from "@/hooks/useKanjiProgress";
 
-export function KanjiProgressPanel({ onPractice }: { onPractice: (lesson: number) => void }) {
+export function KanjiProgressPanel({ onPractice, onReview }: { onPractice: (lesson: number) => void; onReview: (lesson: number) => void }) {
   const snapshot = useKanjiProgress();
   const [today, setToday] = useState<Date | null>(null);
   useEffect(() => {
@@ -41,6 +42,7 @@ export function KanjiProgressPanel({ onPractice }: { onPractice: (lesson: number
     <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-medium">{[
       [totals.rounds > 0, "First steps"], [progress.perfectRounds > 0, "Perfect round"], [progress.bestStreak >= 5, "Five in a row"], [Object.keys(progress.lessons).length >= 5, "Five lessons explored"],
     ].map(([earned, label]) => <span key={String(label)} className={`rounded-full border px-3 py-1.5 ${earned ? "border-amber-200 bg-amber-50 text-amber-900" : "border-neutral-100 text-neutral-400"}`} aria-label={`${label}: ${earned ? "earned" : "not yet earned"}`}>{String(label)}</span>)}</div>
+    <KanjiMasteryPanel progress={progress} now={today?.getTime() ?? 0} onReview={onReview} />
     <details className="mt-5 border-t border-pink-100 pt-1">
       <summary className="min-h-12 cursor-pointer py-4 text-sm font-semibold text-pink-800">Your lesson map · {Object.values(progress.lessons).filter(lesson => lesson.kanjiIds.length === 16).length} / 41 fully practiced</summary>
       <p className="mb-3 text-xs leading-5 text-neutral-500">Coverage counts unique kanji you’ve tried, including misses. Vocabulary adds XP and accuracy. Tap a lesson to practice in Rush.</p>
