@@ -1,31 +1,35 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { emptyProgress, progressTotals, studyDate, studyStreak } from "@/lib/games/kanji-progress";
-import { loadKanjiProgress, PROGRESS_EVENT, PROGRESS_KEY } from "@/lib/games/kanji-progress-store";
+import { progressTotals, studyDate, studyStreak } from "@/lib/games/kanji-progress";
+import { progressSyncMessage, syncKanjiProgress } from "@/lib/games/kanji-progress-store";
+import { useKanjiProgress } from "@/hooks/useKanjiProgress";
+import { KanjiProgressAccount } from "./KanjiProgressAccount";
 
 export function KanjiProgressPanel({ onPractice }: { onPractice: (lesson: number) => void }) {
-  const [snapshot, setSnapshot] = useState({ progress: emptyProgress(), persistent: true });
+  const snapshot = useKanjiProgress();
   const [today, setToday] = useState<Date | null>(null);
   useEffect(() => {
-    const refresh = () => { setSnapshot(loadKanjiProgress()); setToday(new Date()); };
-    const storage = (event: StorageEvent) => { if (event.key === PROGRESS_KEY || event.key === null) refresh(); };
+    const refresh = () => setToday(new Date());
     refresh();
-    window.addEventListener(PROGRESS_EVENT, refresh);
-    window.addEventListener("storage", storage);
     window.addEventListener("focus", refresh);
     const timer = window.setInterval(refresh, 60_000);
-    return () => { window.removeEventListener(PROGRESS_EVENT, refresh); window.removeEventListener("storage", storage); window.removeEventListener("focus", refresh); window.clearInterval(timer); };
+    return () => { window.removeEventListener("focus", refresh); window.clearInterval(timer); };
   }, []);
-  const { progress, persistent } = snapshot;
+  const { progress } = snapshot;
   const totals = progressTotals(progress);
   const daily = today ? progress.days[studyDate(today)] ?? 0 : 0;
   const streak = today ? studyStreak(progress, today) : 0;
   const level = Math.floor(totals.xp / 100) + 1;
   return <section aria-labelledby="kanji-progress-title" className="rounded-2xl border border-pink-100 bg-white p-5 sm:p-6">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-pink-600">Every little practice counts</p><h3 id="kanji-progress-title" className="mt-1 text-xl font-semibold text-neutral-900">Your learning journey</h3><p className="mt-1 text-xs text-neutral-500">{persistent ? "Saved on this browser · Quest + Rush" : "Storage unavailable · progress lasts for this visit only"}</p></div>
+      <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-pink-600">Every little practice counts</p><h3 id="kanji-progress-title" className="mt-1 text-xl font-semibold text-neutral-900">Your learning journey</h3><p role="status" className="mt-1 text-xs text-neutral-500">{progressSyncMessage(snapshot)}</p></div>
       <span className="rounded-full bg-pink-50 px-4 py-2 text-sm font-semibold text-pink-800">Level {level}</span>
+    </div>
+    <KanjiProgressAccount />
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      {progress.lastLesson !== null && <button type="button" onClick={() => onPractice(progress.lastLesson!)} className="min-h-11 rounded-xl bg-pink-50 px-4 py-2 text-sm font-semibold text-pink-800 hover:bg-pink-100">Continue Lesson {progress.lastLesson} in Rush →</button>}
+      {snapshot.accountId && <button type="button" disabled={snapshot.syncStatus === "syncing" || snapshot.syncStatus === "connecting"} onClick={() => void syncKanjiProgress()} className="min-h-11 rounded-xl px-3 py-2 text-xs font-semibold text-neutral-500 underline underline-offset-4 disabled:opacity-50">Sync now</button>}
     </div>
     <div className="mt-4 flex justify-between gap-3 text-xs text-neutral-500"><span data-testid="progress-xp">{totals.xp} XP earned</span><span>{100 - totals.xp % 100} XP to level {level + 1}</span></div>
     <progress aria-label="XP toward next level" max={100} value={totals.xp % 100} className="mt-2 h-2 w-full appearance-none overflow-hidden rounded-full [&::-moz-progress-bar]:bg-pink-500 [&::-webkit-progress-bar]:bg-pink-100 [&::-webkit-progress-value]:bg-pink-500" />

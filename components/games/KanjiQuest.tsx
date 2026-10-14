@@ -9,6 +9,7 @@ import { acceptsQuestAnswer, buildQuestDeck, questReading, questStats, type Ques
 import { HiraganaHandwritingPad, emptyHandwriting } from "@/components/games/HiraganaHandwritingPad";
 import { shuffleArray } from "@/lib/shuffle-array";
 import { newPracticeRoundId, saveKanjiRound } from "@/lib/games/kanji-progress-store";
+import { KanjiSyncStatus } from "./KanjiSyncStatus";
 
 const library: KanjiLibrary = material;
 const mnemonics: Record<string, KanjiMnemonic> = mnemonicData;
@@ -23,7 +24,6 @@ export function KanjiQuest({ initialLesson, onClose }: { initialLesson: number; 
   const composing = useRef(false);
   const locked = useRef(false);
   const roundId = useRef("");
-  const [persistent, setPersistent] = useState(true);
   const recognitionRequest = useRef<AbortController | null>(null);
   const [answerMethod, setAnswerMethod] = useState<"type" | "write">("type");
   const [drawing, setDrawing] = useState(emptyHandwriting);
@@ -135,7 +135,7 @@ export function KanjiQuest({ initialLesson, onClose }: { initialLesson: number; 
   }
 
   function saveProgress() {
-    setPersistent(saveKanjiRound({ id: roundId.current, lesson: lessonNumber, mode, completed: answers.length === deck.length, answers }));
+    saveKanjiRound({ id: roundId.current, lesson: lessonNumber, mode, completed: answers.length === deck.length, answers });
   }
 
   function close() {
@@ -202,7 +202,7 @@ export function KanjiQuest({ initialLesson, onClose }: { initialLesson: number; 
         {stage === "results" && <div className="space-y-5">
           <div className="text-center"><QuestMedal perfect={stats.correct === deck.length} /><p className="mt-2 text-xs font-semibold uppercase tracking-widest text-pink-600">Lesson {lessonNumber} · {retry ? "Practice complete" : "Quest complete"}</p><h3 ref={resultHeading} tabIndex={-1} className="mt-2 text-3xl font-semibold outline-none">{stats.correct === deck.length ? "A perfect little quest." : stats.correct >= deck.length / 2 ? "Your practice is paying off." : "Every reading is a new start."}</h3><p className="mt-3 text-sm leading-6 text-neutral-500">{missed.length ? "Take your new discoveries into one more round." : "You read every card correctly. Ready for another lesson?"}</p></div>
           <dl className="grid grid-cols-3 gap-2 text-center">{[["Correct", `${stats.correct}/${deck.length}`], ["Points", stats.points], ["Best streak", stats.bestStreak]].map(([label, score]) => <div key={label} className="rounded-2xl border border-pink-100 bg-white px-2 py-4"><dt className="text-[11px] text-neutral-500">{label}</dt><dd className="mt-1 text-2xl font-semibold text-pink-800">{score}</dd></div>)}</dl>
-          <p role="status" className="text-center text-xs text-neutral-500">{persistent ? `+${stats.points} XP · Progress saved on this browser.` : "Storage unavailable. Progress kept for this visit only."}</p>
+          <p className="text-center text-xs text-pink-700">+{stats.points} XP added to your learning journey</p><KanjiSyncStatus />
           {missed.length > 0 && <button type="button" onClick={() => begin(missed, true)} className={`${button} w-full bg-pink-600 text-white hover:bg-pink-700`}>Practice {missed.length} missed {missed.length === 1 ? "card" : "cards"} →</button>}
           <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => begin(available)} className={`${button} border border-pink-200 bg-white text-pink-700`}>Play again</button><button type="button" onClick={() => setStage("setup")} className={`${button} border border-pink-200 bg-white text-pink-700`}>Choose lesson</button></div>
           <details className="rounded-2xl border border-neutral-200 bg-white"><summary className="cursor-pointer px-4 py-4 text-sm font-semibold">Review your {answers.length} readings</summary><ul className="divide-y divide-neutral-100 px-4">{answers.map(answer => <li key={answer.card.id} className="py-3"><div className="flex items-start justify-between gap-3"><span lang="ja" className="break-all font-serif text-2xl">{answer.card.prompt}</span><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${answer.correct ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{answer.correct ? answer.hinted ? "With hint" : "Correct" : "Practice"}</span></div><p lang="ja" className="mt-1 break-words text-sm text-pink-700">{answer.card.answers.join(" / ")}</p><p className="mt-1 text-xs text-neutral-500">{answer.card.meaning}</p></li>)}</ul></details>

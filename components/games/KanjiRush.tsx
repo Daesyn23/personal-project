@@ -6,6 +6,7 @@ import type { KanjiLibrary } from "@/lib/kanji-learning";
 import { buildQuestDeck, questStats, type QuestAnswer } from "@/lib/games/kanji-quest";
 import { buildRushQuestions, type RushQuestion } from "@/lib/games/kanji-rush";
 import { newPracticeRoundId, saveKanjiRound } from "@/lib/games/kanji-progress-store";
+import { KanjiSyncStatus } from "./KanjiSyncStatus";
 
 const library: KanjiLibrary = material;
 const button = "min-h-12 rounded-xl px-4 py-3 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-600 disabled:cursor-not-allowed disabled:opacity-60";
@@ -31,7 +32,6 @@ export function KanjiRush({ initialLesson, onClose }: { initialLesson: number; o
   const [paused, setPaused] = useState(false);
   const [confirmExit, setConfirmExit] = useState(false);
   const [expired, setExpired] = useState(false);
-  const [persistent, setPersistent] = useState(true);
   const lesson = library.lessons.find(item => item.number === lessonNumber)!;
   const available = useMemo(() => buildQuestDeck(lesson, "kanji"), [lesson]);
   const stats = questStats(answers);
@@ -50,7 +50,7 @@ export function KanjiRush({ initialLesson, onClose }: { initialLesson: number; o
 
   const finish = useCallback((timeUp = false) => {
     locked.current = true;
-    setPersistent(saveKanjiRound({ id: roundId.current, lesson: lessonNumber, mode: "kanji", completed: answers.length === questions.length, answers }));
+    saveKanjiRound({ id: roundId.current, lesson: lessonNumber, mode: "kanji", completed: answers.length === questions.length, answers });
     setExpired(timeUp); setStage("results");
   }, [answers, lessonNumber, questions.length]);
 
@@ -140,7 +140,7 @@ export function KanjiRush({ initialLesson, onClose }: { initialLesson: number; o
         : stage === "results" ? <div className="space-y-5">
           <div className="text-center"><RushEmblem /><p className="mt-3 text-xs font-semibold uppercase tracking-widest text-pink-600">Lesson {lessonNumber} · {expired ? "Time’s up" : "Round complete"}</p><h3 ref={heading} tabIndex={-1} className="mt-2 text-3xl font-semibold outline-none">{stats.correct === questions.length ? "You found your flow." : stats.correct ? "A little faster. A little stronger." : "Your next round starts here."}</h3><p className="mt-3 text-sm leading-6 text-neutral-500">{answers.length} of {questions.length} cards tried. {expired ? "Unanswered cards don’t count as misses." : "Every attempt helps the next reading feel more familiar."}</p></div>
           <dl className="grid grid-cols-3 gap-2 text-center">{[["Accuracy", answers.length ? `${Math.round(stats.correct / answers.length * 100)}%` : "—"], ["XP earned", stats.points], ["Best streak", stats.bestStreak]].map(([label, value]) => <div key={label} className="rounded-2xl border border-pink-100 bg-white px-2 py-4"><dt className="text-[11px] text-neutral-500">{label}</dt><dd className="mt-1 text-2xl font-semibold text-pink-800">{value}</dd></div>)}</dl>
-          <p role="status" className="text-center text-xs text-neutral-500">{!answers.length ? "Answer a card next round to start earning progress." : persistent ? "Progress saved on this browser." : "Storage unavailable. Progress kept for this visit only."}</p>
+          {answers.length ? <KanjiSyncStatus /> : <p className="text-center text-xs text-neutral-500">Answer a card next round to start earning progress.</p>}
           {missed.length > 0 && <button type="button" onClick={() => begin(missed, true)} className={`${button} w-full bg-pink-600 text-white`}>Practice {missed.length} missed {missed.length === 1 ? "card" : "cards"} · untimed →</button>}
           <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => begin()} className={`${button} border border-pink-200 bg-white text-pink-700`}>Play again</button><button type="button" onClick={() => setStage("setup")} className={`${button} border border-pink-200 bg-white text-pink-700`}>Choose lesson</button></div>
           {!!answers.length && <details className="rounded-2xl border border-neutral-200 bg-white"><summary className="min-h-12 cursor-pointer p-4 text-sm font-semibold">Review your {answers.length} readings</summary><ul className="divide-y divide-neutral-100 px-4">{answers.map(answer => <li key={answer.card.id} className="py-3"><div className="flex items-center justify-between gap-3"><span lang="ja" className="font-serif text-2xl">{answer.card.prompt}</span><span className={`rounded-full px-2 py-1 text-xs ${answer.correct ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{answer.correct ? "Correct" : "Practice"}</span></div><p lang="ja" className="mt-1 break-words text-sm text-pink-700">{answer.card.answers.join(" / ")}</p><p className="mt-1 text-xs text-neutral-500">{answer.card.meaning}</p></li>)}</ul></details>}

@@ -11,6 +11,7 @@ export type KanjiProgress = {
   lastLesson: number | null;
 };
 export type PracticeRound = { id: string; lesson: number; mode: QuestMode; completed: boolean; answers: QuestAnswer[] };
+export type ProgressEvent = { id: string; progress: KanjiProgress; playedAt: string };
 
 export const emptyProgress = (): KanjiProgress => ({ version: 1, lessons: {}, days: {}, bestStreak: 0, perfectRounds: 0, savedRounds: [], lastLesson: null });
 
@@ -58,6 +59,38 @@ export function recordRound(progress: KanjiProgress, round: PracticeRound, now =
 
 const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+
+export function parseProgressEvent(value: unknown): ProgressEvent | null {
+  if (!object(value) || typeof value.id !== "string" || !value.id.length || value.id.length > 200
+    || typeof value.playedAt !== "string" || !Number.isFinite(Date.parse(value.playedAt))) return null;
+  const progress = parseProgress(JSON.stringify(value.progress));
+  return progressTotals(progress).answered > 0 ? { id: value.id, playedAt: value.playedAt, progress } : null;
+}
+
+/** Immutable round IDs make retries, offline uploads, and overlapping reads idempotent. */
+export function combineProgressEvents(events: ProgressEvent[]): KanjiProgress {
+  const result = emptyProgress();
+  const unique = [...new Map(events.map(event => [event.id, event])).values()]
+    .sort((a, b) => a.playedAt.localeCompare(b.playedAt) || a.id.localeCompare(b.id));
+  const rounds = new Set<string>();
+  for (const { progress } of unique) {
+    for (const [number, lesson] of Object.entries(progress.lessons)) {
+      const previous = result.lessons[number] ?? { answered: 0, correct: 0, xp: 0, rounds: 0, kanjiIds: [] };
+      result.lessons[number] = {
+        answered: previous.answered + lesson.answered, correct: previous.correct + lesson.correct,
+        xp: previous.xp + lesson.xp, rounds: previous.rounds + lesson.rounds,
+        kanjiIds: [...new Set([...previous.kanjiIds, ...lesson.kanjiIds])].sort(),
+      };
+    }
+    for (const [day, answers] of Object.entries(progress.days)) result.days[day] = (result.days[day] ?? 0) + answers;
+    result.bestStreak = Math.max(result.bestStreak, progress.bestStreak);
+    result.perfectRounds += progress.perfectRounds;
+    result.lastLesson = progress.lastLesson ?? result.lastLesson;
+    progress.savedRounds.forEach(id => rounds.add(id));
+  }
+  result.savedRounds = [...rounds].slice(-512);
+  return result;
+}
 
 /** Reject broken/older data instead of letting it break the games. */
 export function parseProgress(raw: string | null): KanjiProgress {
