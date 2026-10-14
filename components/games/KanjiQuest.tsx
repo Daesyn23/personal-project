@@ -8,6 +8,7 @@ import type { KanjiMnemonic } from "@/lib/kanji-mnemonic-types";
 import { acceptsQuestAnswer, buildQuestDeck, questReading, questStats, type QuestAnswer, type QuestCard, type QuestMode } from "@/lib/games/kanji-quest";
 import { HiraganaHandwritingPad, emptyHandwriting } from "@/components/games/HiraganaHandwritingPad";
 import { shuffleArray } from "@/lib/shuffle-array";
+import { newPracticeRoundId, saveKanjiRound } from "@/lib/games/kanji-progress-store";
 
 const library: KanjiLibrary = material;
 const mnemonics: Record<string, KanjiMnemonic> = mnemonicData;
@@ -21,6 +22,8 @@ export function KanjiQuest({ initialLesson, onClose }: { initialLesson: number; 
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const composing = useRef(false);
   const locked = useRef(false);
+  const roundId = useRef("");
+  const [persistent, setPersistent] = useState(true);
   const recognitionRequest = useRef<AbortController | null>(null);
   const [answerMethod, setAnswerMethod] = useState<"type" | "write">("type");
   const [drawing, setDrawing] = useState(emptyHandwriting);
@@ -69,6 +72,7 @@ export function KanjiQuest({ initialLesson, onClose }: { initialLesson: number; 
   }, [stage, index, feedback, confirmExit, answerMethod]);
 
   function begin(cards: QuestCard[], isRetry = false) {
+    roundId.current = newPracticeRoundId();
     setDeck(shuffleArray(cards).slice(0, isRetry ? cards.length : length));
     setAnswers([]); setIndex(0); setValue(""); setHinted(false); setFeedback(null);
     setDrawing(emptyHandwriting()); setRecognitionError("");
@@ -126,8 +130,12 @@ export function KanjiQuest({ initialLesson, onClose }: { initialLesson: number; 
 
   function advance() {
     setDrawing(emptyHandwriting()); setRecognitionError("");
-    if (index + 1 === deck.length) setStage("results");
+    if (index + 1 === deck.length) { saveProgress(); setStage("results"); }
     else { setIndex(current => current + 1); setValue(""); setHinted(false); setFeedback(null); locked.current = false; }
+  }
+
+  function saveProgress() {
+    setPersistent(saveKanjiRound({ id: roundId.current, lesson: lessonNumber, mode, completed: answers.length === deck.length, answers }));
   }
 
   function close() {
@@ -142,9 +150,9 @@ export function KanjiQuest({ initialLesson, onClose }: { initialLesson: number; 
         <button type="button" onClick={close} aria-label="Close Kanji Quest" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-pink-100 bg-white text-2xl text-neutral-500 hover:bg-pink-50">×</button>
       </header>
       {confirmExit ? <div className="m-auto w-full max-w-sm p-6 text-center" role="alert">
-        <h3 className="text-xl font-semibold">Leave this round?</h3><p className="mt-3 text-sm leading-6 text-neutral-600">Your current round will end. You can start a fresh quest anytime.</p>
+        <h3 className="text-xl font-semibold">Leave this round?</h3><p className="mt-3 text-sm leading-6 text-neutral-600">Your checked readings will count toward your progress. You can start a fresh quest anytime.</p>
         <button type="button" autoFocus onClick={() => setConfirmExit(false)} className={`${button} mt-6 w-full bg-pink-600 text-white`}>Keep playing</button>
-        <button type="button" onClick={onClose} className={`${button} mt-2 w-full border border-pink-200 bg-white text-pink-700`}>Leave round</button>
+        <button type="button" onClick={() => { saveProgress(); onClose(); }} className={`${button} mt-2 w-full border border-pink-200 bg-white text-pink-700`}>Leave round</button>
       </div> : <div ref={content} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-5 sm:px-7">
         {stage === "setup" && <div className="space-y-6">
           <div className="text-center"><div aria-hidden="true" className="mx-auto flex w-fit items-center gap-3"><span lang="ja" className="rotate-[-6deg] rounded-2xl border border-pink-200 bg-white px-5 py-3 font-serif text-5xl text-pink-900 shadow-sm">学</span><span className="text-pink-400">→</span><span lang="ja" className="rotate-[4deg] rounded-2xl bg-pink-100 px-5 py-4 text-3xl text-pink-800">がく</span></div><h3 className="mt-5 text-2xl font-semibold">Turn recognition into recall.</h3><p className="mt-2 text-sm leading-6 text-neutral-600">A little challenge, one reading at a time.<br />No timer. Just you and your next breakthrough.</p></div>
@@ -153,6 +161,7 @@ export function KanjiQuest({ initialLesson, onClose }: { initialLesson: number; 
           <fieldset><legend className="mb-2 text-sm font-semibold">Round length</legend><div className="flex gap-2">{[8, 16].map(size => <label key={size} className={`flex min-h-12 flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 text-sm ${length === size ? "border-pink-400 bg-pink-50 text-pink-800" : "border-neutral-200 bg-white"}`}><input type="radio" name="quest-length" checked={length === size} onChange={() => setLength(size)} className="accent-pink-600" />{size === 8 ? "Quick 8" : "Full 16"}</label>)}</div></fieldset>
           <div><p className="mb-2 text-sm font-semibold">Answer with</p>{answerMethodPicker()}</div>
           <p className="rounded-xl bg-white p-3 text-xs leading-6 text-neutral-600">Write hiragana with your finger, or type hiragana or romaji, then press <strong>Done</strong>. Earn <strong>10 points</strong> per correct reading, or <strong>5</strong> with a story hint. Missed cards become your own practice round.</p>
+          <p className="text-xs leading-5 text-neutral-500">Your points become XP. Finish or leave a round to save your checked readings to your learning journey.</p>
           <button type="button" disabled={!available.length} onClick={() => begin(available)} className={`${button} w-full bg-pink-600 text-white shadow-lg shadow-pink-200/50 hover:bg-pink-700`}>Start Lesson {lessonNumber} · {Math.min(length, available.length)} cards →</button>
         </div>}
 
@@ -193,6 +202,7 @@ export function KanjiQuest({ initialLesson, onClose }: { initialLesson: number; 
         {stage === "results" && <div className="space-y-5">
           <div className="text-center"><QuestMedal perfect={stats.correct === deck.length} /><p className="mt-2 text-xs font-semibold uppercase tracking-widest text-pink-600">Lesson {lessonNumber} · {retry ? "Practice complete" : "Quest complete"}</p><h3 ref={resultHeading} tabIndex={-1} className="mt-2 text-3xl font-semibold outline-none">{stats.correct === deck.length ? "A perfect little quest." : stats.correct >= deck.length / 2 ? "Your practice is paying off." : "Every reading is a new start."}</h3><p className="mt-3 text-sm leading-6 text-neutral-500">{missed.length ? "Take your new discoveries into one more round." : "You read every card correctly. Ready for another lesson?"}</p></div>
           <dl className="grid grid-cols-3 gap-2 text-center">{[["Correct", `${stats.correct}/${deck.length}`], ["Points", stats.points], ["Best streak", stats.bestStreak]].map(([label, score]) => <div key={label} className="rounded-2xl border border-pink-100 bg-white px-2 py-4"><dt className="text-[11px] text-neutral-500">{label}</dt><dd className="mt-1 text-2xl font-semibold text-pink-800">{score}</dd></div>)}</dl>
+          <p role="status" className="text-center text-xs text-neutral-500">{persistent ? `+${stats.points} XP · Progress saved on this browser.` : "Storage unavailable. Progress kept for this visit only."}</p>
           {missed.length > 0 && <button type="button" onClick={() => begin(missed, true)} className={`${button} w-full bg-pink-600 text-white hover:bg-pink-700`}>Practice {missed.length} missed {missed.length === 1 ? "card" : "cards"} →</button>}
           <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => begin(available)} className={`${button} border border-pink-200 bg-white text-pink-700`}>Play again</button><button type="button" onClick={() => setStage("setup")} className={`${button} border border-pink-200 bg-white text-pink-700`}>Choose lesson</button></div>
           <details className="rounded-2xl border border-neutral-200 bg-white"><summary className="cursor-pointer px-4 py-4 text-sm font-semibold">Review your {answers.length} readings</summary><ul className="divide-y divide-neutral-100 px-4">{answers.map(answer => <li key={answer.card.id} className="py-3"><div className="flex items-start justify-between gap-3"><span lang="ja" className="break-all font-serif text-2xl">{answer.card.prompt}</span><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${answer.correct ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{answer.correct ? answer.hinted ? "With hint" : "Correct" : "Practice"}</span></div><p lang="ja" className="mt-1 break-words text-sm text-pink-700">{answer.card.answers.join(" / ")}</p><p className="mt-1 text-xs text-neutral-500">{answer.card.meaning}</p></li>)}</ul></details>
