@@ -3,7 +3,7 @@ import type { KanjiLesson } from "../kanji-learning";
 
 export type QuestMode = "kanji" | "vocabulary";
 export type QuestCard = { id: string; prompt: string; character: string; meaning: string; answers: string[] };
-export type QuestAnswer = { card: QuestCard; correct: boolean; hinted: boolean; answer: string };
+export type QuestAnswer = { card: QuestCard; correct: boolean; hinted: boolean; answer: string; handwritten?: boolean };
 
 /** Convert input without stripping punctuation or kanji that should fail grading. */
 export function questReading(value: string): string {

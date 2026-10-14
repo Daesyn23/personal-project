@@ -179,6 +179,8 @@ export async function openaiChatCompletionMultimodal(options: {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  jsonMode?: boolean;
+  signal?: AbortSignal;
 }): Promise<{ text: string; model: string }> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
@@ -193,9 +195,11 @@ export async function openaiChatCompletionMultimodal(options: {
     temperature: options.temperature ?? 0.2,
     max_tokens: options.maxTokens ?? 4096,
   };
+  if (options.jsonMode) body.response_format = { type: "json_object" };
 
   const res = await fetch(OPENAI_CHAT_URL, {
     method: "POST",
+    signal: options.signal,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
