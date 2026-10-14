@@ -54,7 +54,7 @@ function hydrate(id = accountId ?? "guest") {
         const guest = scopeFor("guest");
         if (!guest.pending.has(eventId)) rememberPending({ id: eventId, progress: legacy, playedAt: new Date().toISOString() }, "guest");
       }
-      // v1 remains untouched as a backup. Import into the next signed-in account only once.
+      // v1 remains untouched as a backup. Import into the shared learning profile only once.
       if (scopeFor("guest").persistent) window.localStorage.setItem(MIGRATED_KEY, "1");
     }
     migrated = true;
@@ -72,15 +72,32 @@ function hydrate(id = accountId ?? "guest") {
 }
 
 function setAccount(id: string | null, email: string | null, available = true) {
-  if (accountReady && id === accountId && configured === available) { accountEmail = email; return; }
+  if (accountReady && id === accountId && configured === available) { accountEmail = email; if (id) void syncKanjiProgress(); return; }
   hydrate("guest");
   accountId = id; accountEmail = email; accountReady = true; configured = available;
   epoch++; lastSyncedAt = null;
   if (id) {
     hydrate(id);
+    // This app has one learner. Preserve cached progress from the former email flow.
+    const previousScopes = new Set<string>();
+    try {
+      for (let index = 0; index < window.localStorage.length; index++) {
+        const key = window.localStorage.key(index) ?? "";
+        if (key.startsWith(CACHE_PREFIX)) previousScopes.add(key.slice(CACHE_PREFIX.length));
+        if (key.startsWith(OUTBOX_PREFIX)) previousScopes.add(key.slice(OUTBOX_PREFIX.length).split(":")[0]);
+      }
+      for (const previousId of previousScopes) {
+        if (!/^[a-f0-9-]{36}$/i.test(previousId)) continue;
+        hydrate(previousId);
+        const previous = scopeFor(previousId);
+        for (const event of [...previous.cloud.values(), ...previous.pending.values()]) {
+          if (!scopeFor(id).cloud.has(event.id)) rememberPending(event, id);
+        }
+      }
+    } catch { scopeFor(id).persistent = false; }
     const guest = scopeFor("guest");
     for (const event of guest.pending.values()) {
-      // Write into the private account's outbox before removing its guest copy.
+      // Write into the shared profile's outbox before removing its guest copy.
       const durable = rememberPending(event, id);
       if (durable) {
         try { window.localStorage.removeItem(outboxKey("guest", event.id)); } catch { /* Retry on next visit. */ }
@@ -180,7 +197,7 @@ export function progressSyncMessage(snapshot: ReturnType<typeof loadKanjiProgres
   const { syncStatus, pendingCount, persistent } = snapshot;
   if (syncStatus === "synced") return "Synced across your devices";
   const saved = persistent ? "Saved on this device" : "Kept in this tab only — keep it open until synced";
-  if (syncStatus === "signin") return `${saved} · sign in to sync`;
+  if (syncStatus === "signin") return `${saved} · connect this device to sync`;
   if (syncStatus === "connecting" || syncStatus === "syncing") return pendingCount ? `${saved} · syncing…` : "Checking your shared progress…";
   if (syncStatus === "offline") return `${saved} · offline, will sync when connected`;
   if (syncStatus === "setup") return `${saved} · cloud setup needed`;

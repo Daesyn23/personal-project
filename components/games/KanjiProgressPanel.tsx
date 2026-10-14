@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { progressTotals, studyDate, studyStreak } from "@/lib/games/kanji-progress";
 import { progressSyncMessage, syncKanjiProgress } from "@/lib/games/kanji-progress-store";
 import { useKanjiProgress } from "@/hooks/useKanjiProgress";
-import { KanjiProgressAccount } from "./KanjiProgressAccount";
 
 export function KanjiProgressPanel({ onPractice }: { onPractice: (lesson: number) => void }) {
   const snapshot = useKanjiProgress();
@@ -26,7 +25,6 @@ export function KanjiProgressPanel({ onPractice }: { onPractice: (lesson: number
       <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-pink-600">Every little practice counts</p><h3 id="kanji-progress-title" className="mt-1 text-xl font-semibold text-neutral-900">Your learning journey</h3><p role="status" className="mt-1 text-xs text-neutral-500">{progressSyncMessage(snapshot)}</p></div>
       <span className="rounded-full bg-pink-50 px-4 py-2 text-sm font-semibold text-pink-800">Level {level}</span>
     </div>
-    <KanjiProgressAccount />
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {progress.lastLesson !== null && <button type="button" onClick={() => onPractice(progress.lastLesson!)} className="min-h-11 rounded-xl bg-pink-50 px-4 py-2 text-sm font-semibold text-pink-800 hover:bg-pink-100">Continue Lesson {progress.lastLesson} in Rush →</button>}
       {snapshot.accountId && <button type="button" disabled={snapshot.syncStatus === "syncing" || snapshot.syncStatus === "connecting"} onClick={() => void syncKanjiProgress()} className="min-h-11 rounded-xl px-3 py-2 text-xs font-semibold text-neutral-500 underline underline-offset-4 disabled:opacity-50">Sync now</button>}
