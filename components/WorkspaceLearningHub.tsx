@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import material from "@/data/kanji-lessons.json";
 import mnemonicData from "@/data/kanji-mnemonics.json";
+import { KanjiQuestLauncher } from "@/components/games/KanjiQuestLauncher";
 import { KanjiMnemonicCard } from "@/components/KanjiMnemonicCard";
 import type { KanjiMnemonic } from "@/lib/kanji-mnemonic-types";
 import { matchesKanji, type KanjiEntry, type KanjiLesson, type KanjiLibrary } from "@/lib/kanji-learning";
@@ -53,6 +54,8 @@ export function WorkspaceLearningHub() {
         </div>
       </div>
 
+      <KanjiQuestLauncher initialLesson={lessonNumber === "all" ? 0 : Number(lessonNumber)} />
+
       <div className="space-y-4 rounded-2xl border border-pink-100 bg-white/90 p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="flex-1">
@@ -87,6 +90,7 @@ export function WorkspaceLearningHub() {
                 <span className="text-xs font-medium text-pink-600 lg:text-[10px] lg:uppercase lg:tracking-widest">Lesson</span>
                 <span className="tabular-nums lg:text-xl">{lesson.number}</span>
                 <span className="ml-auto text-xs font-normal text-pink-700/70 lg:hidden">{lesson.entries.length} kanji</span>
+                <KanjiQuestLauncher initialLesson={lesson.number} compact />
               </h4>
               <div className="grid min-w-0 flex-1 grid-cols-4 sm:grid-cols-8 lg:grid-cols-[repeat(16,minmax(0,1fr))]">
                 {lesson.entries.map(entry => <button key={entry.id} type="button" onClick={() => setSelectedId(entry.id)} aria-label={`${entry.character} — ${entry.meaning}, Lesson ${lesson.number}`} className="kanji-cell group flex min-h-28 min-w-0 flex-col items-stretch border-b border-r border-neutral-100 transition hover:bg-pink-50 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-pink-600">

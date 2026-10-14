@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { KanjiQuestLauncher } from "@/components/games/KanjiQuestLauncher";
 import { HeadingWithInfo } from "@/components/InfoTip";
 import { MatchGame } from "@/components/games/MatchGame";
 import { MultipleChoiceGame } from "@/components/games/MultipleChoiceGame";
@@ -160,6 +161,7 @@ export function WorkspaceGamesSection({
 
   return (
     <section className="min-w-0 space-y-8 sm:space-y-10">
+      <KanjiQuestLauncher />
       <header className="relative overflow-hidden rounded-3xl border border-pink-100/80 bg-white/70 px-5 py-6 shadow-sm shadow-pink-100/30 backdrop-blur-sm sm:px-8 sm:py-8">
         <div
           className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-gradient-to-bl from-pink-300/35 via-rose-200/20 to-transparent blur-2xl"
